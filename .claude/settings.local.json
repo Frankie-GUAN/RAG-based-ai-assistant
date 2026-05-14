@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:8501)",
+      "Bash(.venv/Scripts/streamlit run *)",
+      "Bash(curl *)",
+      "Bash(.venv/Scripts/python -c \"import app\")",
+      "Bash(pkill -f streamlit)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(gh repo *)",
+      "Bash(cp *)",
+      "Bash(git clone *)",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f['name'], f['type']\\) for f in data]\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f['name']\\) for f in data]\")",
+      "Bash(.venv/Scripts/python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f['name']\\) for f in data]\")",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(.venv/Scripts/python .claude/skills/superpowers/download_superpowers.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c ' *)",
+      "WebFetch(domain:localhost)",
+      "Bash(.venv/Scripts/python -c \"import ast; ast.parse\\(open\\('app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(.venv/Scripts/python -c \"import toml; toml.load\\('.streamlit/config.toml'\\); print\\('Config OK'\\)\")"
+    ]
+  }
+}
