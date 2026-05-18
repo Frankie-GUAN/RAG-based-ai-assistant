@@ -6,6 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.base import Base
 from app.db.session import engine
 
+import app.models.conversation  # noqa: F401
+import app.models.message       # noqa: F401
+import app.models.document      # noqa: F401
+import app.models.evaluation    # noqa: F401
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
