@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     llm_model: str = "gemini-2.5-flash"
-    embed_model: str = "gemini-embedding-001"
+    embed_model: str = "BAAI/bge-m3"
 
     # MySQL
     mysql_host: str = "localhost"
@@ -33,8 +33,14 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
     @property
+    def embed_model_path(self) -> str:
+        local_path = self.data_dir / "models" / "BAAI" / "bge-m3"
+        if local_path.exists():
+            return str(local_path)
+        return self.embed_model
+
+    @property
     def reranker_model_path(self) -> str:
-        """Resolve local model path if available, otherwise return HuggingFace model name."""
         local_path = self.data_dir / "models" / "BAAI" / "bge-reranker-v2-m3"
         if local_path.exists():
             return str(local_path)

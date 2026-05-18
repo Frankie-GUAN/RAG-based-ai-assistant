@@ -3,17 +3,17 @@ from typing import List, Optional
 
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from app.config import settings
 
 
-def get_embeddings() -> GoogleGenerativeAIEmbeddings:
-    if not settings.gemini_api_key:
-        raise ValueError("GEMINI_API_KEY is not set")
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model=settings.embed_model,
-        google_api_key=settings.gemini_api_key,
+def get_embeddings() -> HuggingFaceEmbeddings:
+    model_name = settings.embed_model_path
+    embeddings = HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
     )
     embeddings.embed_query("ping")
     return embeddings
