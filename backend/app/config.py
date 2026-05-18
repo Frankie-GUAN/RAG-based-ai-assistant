@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
+    @property
+    def reranker_model_path(self) -> str:
+        """Resolve local model path if available, otherwise return HuggingFace model name."""
+        local_path = self.data_dir / "models" / "BAAI" / "bge-reranker-v2-m3"
+        if local_path.exists():
+            return str(local_path)
+        return self.reranker_model
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

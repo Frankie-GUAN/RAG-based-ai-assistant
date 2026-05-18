@@ -12,6 +12,7 @@ __pycache__/
 # Local data/cache
 data/chroma/
 data/uploads/
+data/models/
 
 # Tooling caches
 .pytest_cache/
