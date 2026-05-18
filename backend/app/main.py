@@ -8,6 +8,7 @@ from app.db.session import engine
 from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.tools import router as tools_router
+from app.api.evaluation import router as eval_router
 
 import app.models.conversation  # noqa: F401
 import app.models.message       # noqa: F401
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(knowledge_router)
 app.include_router(tools_router)
+app.include_router(eval_router)
 
 
 @app.get("/api/health")
