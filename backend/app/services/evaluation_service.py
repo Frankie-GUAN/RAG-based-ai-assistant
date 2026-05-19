@@ -3,7 +3,7 @@ from typing import List
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from app.agent.graph import agent_graph
 from app.agent.state import AgentState
@@ -25,9 +25,10 @@ def _run_query(question: str, has_docs: bool) -> tuple[str, str]:
 
 
 def _evaluate_single(query: str, answer: str, context: str) -> dict:
-    llm = ChatGoogleGenerativeAI(
+    llm = ChatOpenAI(
         model=settings.llm_model,
-        google_api_key=settings.gemini_api_key,
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_base_url,
         temperature=0,
     )
 
@@ -78,7 +79,7 @@ def run_evaluation(queries: List[str], has_docs: bool) -> List[dict]:
         except Exception as e:
             msg = str(e)
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                msg = "Gemini API 免费额度已用完（每分钟 20 次），请稍后重试"
+                msg = "API 请求频率过高，请稍后重试"
             results.append({
                 "query": query,
                 "answer": "",

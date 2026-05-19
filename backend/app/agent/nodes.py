@@ -1,18 +1,18 @@
-import os
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from app.agent.state import AgentState
 from app.config import settings
 from app.tools.registry import tool_registry
 
 
-def _get_llm() -> ChatGoogleGenerativeAI:
-    return ChatGoogleGenerativeAI(
+def _get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
         model=settings.llm_model,
-        google_api_key=settings.gemini_api_key,
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_base_url,
         temperature=0.2,
     )
 

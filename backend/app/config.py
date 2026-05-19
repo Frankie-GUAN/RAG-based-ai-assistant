@@ -3,9 +3,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    # Gemini
-    gemini_api_key: str = ""
-    llm_model: str = "gemini-2.5-flash"
+    # DeepSeek (OpenAI-compatible)
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-chat"
     embed_model: str = "BAAI/bge-m3"
 
     # MySQL
