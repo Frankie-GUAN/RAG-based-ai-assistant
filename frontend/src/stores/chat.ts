@@ -17,15 +17,16 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function loadMessages(msgs: ChatMessage[]) {
-    messages.value = msgs
+    messages.value.splice(0, messages.value.length, ...msgs)
   }
 
   function setConversations(list: ConversationSummary[]) {
-    conversations.value = list
+    conversations.value.splice(0, conversations.value.length, ...list)
   }
 
   function removeConversation(id: number) {
-    conversations.value = conversations.value.filter(c => c.id !== id)
+    const idx = conversations.value.findIndex(c => c.id === id)
+    if (idx !== -1) conversations.value.splice(idx, 1)
   }
 
   function prependConversation(summary: ConversationSummary) {
@@ -33,7 +34,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function clearMessages() {
-    messages.value = []
+    messages.value.splice(0, messages.value.length)
     conversationId.value = null
   }
 

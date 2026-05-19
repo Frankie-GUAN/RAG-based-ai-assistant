@@ -25,14 +25,27 @@
 
       <!-- List -->
       <div v-else class="space-y-0.5">
-        <button
+        <div
           v-for="conv in conversations"
           :key="conv.id"
-          @click="$emit('select', conv.id)"
           class="conv-item"
           :class="{ active: conv.id === activeId }"
+          @click="onSelectConv(conv.id)"
         >
-          <div class="conv-title">{{ conv.title }}</div>
+          <div v-if="editingId === conv.id" class="flex gap-1.5 items-center" @click.stop>
+            <input
+              ref="editInput"
+              v-model="editTitle"
+              class="edit-input"
+              maxlength="100"
+              @keydown.enter="saveRename(conv.id)"
+              @keydown.escape="cancelRename"
+              @blur="saveRename(conv.id)"
+            />
+          </div>
+          <div v-else class="conv-title" @dblclick.stop="startRename(conv.id, conv.title)">
+            {{ conv.title }}
+          </div>
           <div class="conv-preview">{{ conv.last_message_preview }}</div>
           <div class="conv-meta">
             <span>{{ formatDate(conv.updated_at) }}</span>
@@ -43,7 +56,7 @@
             @click.stop="$emit('delete', conv.id)"
             title="Delete conversation"
           >&times;</button>
-        </button>
+        </div>
       </div>
     </div>
 
@@ -55,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import type { ConversationSummary } from '../../types'
 
 defineProps<{
@@ -64,13 +77,46 @@ defineProps<{
   loading: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   select: [id: number]
   delete: [id: number]
   newChat: []
+  rename: [id: number, title: string]
 }>()
 
 const visible = ref(true)
+const editingId = ref<number | null>(null)
+const editTitle = ref('')
+const editInput = ref<HTMLInputElement>()
+
+function onSelectConv(id: number) {
+  if (editingId.value !== id) {
+    emit('select', id)
+  }
+}
+
+async function startRename(id: number, title: string) {
+  editingId.value = id
+  editTitle.value = title
+  await nextTick()
+  editInput.value?.focus()
+  editInput.value?.select()
+}
+
+function saveRename(id: number) {
+  if (editingId.value !== id) return
+  const newTitle = editTitle.value.trim()
+  if (newTitle && newTitle.length > 0) {
+    emit('rename', id, newTitle)
+  }
+  editingId.value = null
+  editTitle.value = ''
+}
+
+function cancelRename() {
+  editingId.value = null
+  editTitle.value = ''
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return ''
@@ -255,4 +301,20 @@ function formatDate(iso: string | null): string {
   transition: opacity 120ms;
 }
 .sidebar:hover .toggle-btn { opacity: 0.6; }
+
+.edit-input {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--clay);
+  border-radius: 6px;
+  outline: none;
+}
+.edit-input:focus {
+  border-color: var(--clay);
+  box-shadow: 0 0 0 2px var(--clay-wash);
+}
 </style>

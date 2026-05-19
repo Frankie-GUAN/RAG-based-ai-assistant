@@ -21,10 +21,18 @@ export function useConversations() {
     return res.json()
   }
 
+  async function renameConversation(id: number, title: string) {
+    await fetch(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+  }
+
   async function deleteConversation(id: number) {
     await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
     store.removeConversation(id)
   }
 
-  return { fetchConversations, loadConversation, deleteConversation }
+  return { fetchConversations, loadConversation, renameConversation, deleteConversation }
 }

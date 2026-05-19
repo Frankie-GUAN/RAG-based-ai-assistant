@@ -8,6 +8,7 @@
       @select="onSelectConversation"
       @delete="onDeleteConversation"
       @new-chat="onNewChat"
+      @rename="onRenameConversation"
     />
 
     <!-- Main conversation column -->
@@ -87,7 +88,7 @@ import AgentThinking from '../components/chat/AgentThinking.vue'
 import ConversationSidebar from '../components/chat/ConversationSidebar.vue'
 
 const { messages, isStreaming, currentRoute, streamingContent, sendMessage, loadConversationHistory, clearMessages } = useChat()
-const { fetchConversations, deleteConversation } = useConversations()
+const { fetchConversations, deleteConversation, renameConversation } = useConversations()
 const store = useChatStore()
 const msgContainer = ref<HTMLElement>()
 const showContext = ref(false)
@@ -131,6 +132,11 @@ async function onDeleteConversation(id: number) {
   if (store.conversationId === id) {
     clearMessages()
   }
+}
+
+async function onRenameConversation(id: number, title: string) {
+  await renameConversation(id, title)
+  fetchConversations()
 }
 
 function onNewChat() {

@@ -115,6 +115,17 @@ def get_conversation_with_context(db: Session, conversation_id: int) -> dict:
     }
 
 
+def rename_conversation(db: Session, conversation_id: int, title: str) -> Conversation:
+    conv = db.execute(
+        select(Conversation).where(Conversation.id == conversation_id)
+    ).scalar_one_or_none()
+    if not conv:
+        raise ValueError(f"Conversation {conversation_id} not found")
+    conv.title = title
+    db.flush()
+    return conv
+
+
 def delete_conversation(db: Session, conversation_id: int) -> None:
     db.execute(delete(Message).where(Message.conversation_id == conversation_id))
     db.execute(delete(Conversation).where(Conversation.id == conversation_id))
