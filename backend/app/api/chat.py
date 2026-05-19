@@ -13,6 +13,7 @@ from app.services.conversation_service import (
     get_conversation_with_context,
 )
 from app.db.session import SessionLocal
+from app.rag.vector_store import has_persisted_index
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -52,10 +53,13 @@ async def _stream_chat(request: ChatRequest) -> AsyncGenerator[dict, None]:
 
         yield {"event": "status", "data": json.dumps({"status": "thinking"})}
 
+        # Auto-detect document availability for RAG routing
+        effective_has_docs = request.has_docs or has_persisted_index()
+
         # Run agent in thread pool (LangGraph is sync)
         result = await loop.run_in_executor(
             None, run_agent, request.question, history_for_agent,
-            request.has_docs, summary
+            effective_has_docs, summary
         )
 
         # Save assistant message
