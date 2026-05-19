@@ -33,18 +33,18 @@ export function useChat() {
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           const data = JSON.parse(line.slice(6))
-          if (data.status === 'thinking') {
-            currentRoute.value = '思考中...'
-          } else if (data.route) {
-            currentRoute.value = data.route
-          } else if (data.content) {
-            streamingContent.value += data.content
-          } else if (data.answer) {
+          if (data.answer) {
             messages.value.push({
               role: 'assistant',
               content: data.answer,
               sourceType: data.route === 'web' ? 'web' : data.route === 'rag' ? 'doc' : undefined,
             })
+          } else if (data.status === 'thinking') {
+            currentRoute.value = '思考中...'
+          } else if (data.content) {
+            streamingContent.value += data.content
+          } else if (data.route) {
+            currentRoute.value = data.route
           }
         }
       }
