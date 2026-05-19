@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
+    # History compression
+    history_window_size: int = 10
+
     @property
     def embed_model_path(self) -> str:
         local_path = self.data_dir / "models" / "BAAI" / "bge-m3"

@@ -25,3 +25,29 @@ export interface EvalResult {
   faithfulness: number
   answer_relevancy: number
 }
+
+export interface ConversationSummary {
+  id: number
+  title: string
+  message_count: number
+  last_message_preview: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ConversationDetail {
+  conversation: {
+    id: number
+    title: string
+    created_at: string | null
+    updated_at: string | null
+  }
+  summary: string | null
+  messages: {
+    id: number
+    role: string
+    content: string
+    source_type: string | null
+    created_at: string | null
+  }[]
+}

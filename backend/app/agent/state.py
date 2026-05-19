@@ -11,3 +11,4 @@ class AgentState(TypedDict):
     context: str
     iteration: int
     final_answer: str
+    summary: str

@@ -3,7 +3,7 @@ from app.agent.graph import agent_graph
 from app.agent.state import AgentState
 
 
-def run_agent(question: str, history: list[dict], has_docs: bool) -> dict:
+def run_agent(question: str, history: list[dict], has_docs: bool, summary: str | None = None) -> dict:
     lc_messages = []
     for m in history:
         if m["role"] == "user":
@@ -20,6 +20,7 @@ def run_agent(question: str, history: list[dict], has_docs: bool) -> dict:
         "context": "",
         "iteration": 0,
         "final_answer": "",
+        "summary": summary or "",
     }
     result = agent_graph.invoke(initial_state)
     return {
