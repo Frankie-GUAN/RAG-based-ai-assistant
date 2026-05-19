@@ -1,6 +1,6 @@
 <template>
   <div
-    class="rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 border-2 border-dashed"
+    class="rounded-2xl p-16 text-center cursor-pointer transition-all duration-300 border-2 border-dashed"
     :style="{
       background: isDragging ? 'var(--clay-wash)' : 'var(--white)',
       borderColor: isDragging ? 'var(--clay)' : 'var(--rule)',

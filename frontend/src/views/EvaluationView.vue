@@ -1,8 +1,8 @@
 <template>
   <div class="h-full overflow-y-auto">
-    <div class="max-w-4xl mx-auto px-8 py-12">
-      <h1 class="text-3xl mb-2" style="font-family: var(--font-display)">Evaluation</h1>
-      <p class="mb-10" style="color: var(--ink-muted)">Measure retrieval quality. Each query runs through the full Agent pipeline and is scored on faithfulness and relevancy.</p>
+    <div class="max-w-4xl mx-auto px-10 py-14">
+      <h1 class="text-4xl mb-3" style="font-family: var(--font-display)">Evaluation</h1>
+      <p class="text-lg mb-12 max-w-2xl" style="color: var(--ink-muted)">Measure retrieval quality. Each query runs through the full Agent pipeline and is scored on faithfulness and relevancy.</p>
 
       <!-- Query input card -->
       <div class="rounded-2xl p-6 mb-10" style="background: var(--white); border: 1px solid var(--rule)">

@@ -1,17 +1,17 @@
 <template>
-  <article class="py-5" :class="message.role === 'user' ? 'user-msg' : 'assistant-msg'">
+  <article class="py-6" :class="message.role === 'user' ? 'user-msg' : 'assistant-msg'">
     <!-- Label -->
-    <div class="flex items-center gap-2 mb-2">
+    <div class="flex items-center gap-2.5 mb-3">
       <span class="label-dot" :class="message.role === 'user' ? 'dot-user' : 'dot-assistant'"></span>
-      <span class="text-xs font-semibold uppercase tracking-widest" style="font-family: var(--font-body)"
+      <span class="text-sm font-semibold uppercase tracking-widest" style="font-family: var(--font-body)"
         :style="{ color: message.role === 'user' ? 'var(--ink-muted)' : 'var(--clay)' }">
         {{ message.role === 'user' ? 'You' : 'RAG Agent' }}
       </span>
-      <span class="text-[10px] tracking-wide opacity-30">{{ message.role === 'assistant' && message.sourceType ? routeLabel : '' }}</span>
+      <span class="text-xs tracking-wide opacity-30">{{ message.role === 'assistant' && message.sourceType ? routeLabel : '' }}</span>
     </div>
 
-    <!-- Content — larger type for readability -->
-    <div class="text-base leading-relaxed" style="color: var(--ink)" v-html="renderedContent"></div>
+    <!-- Content -->
+    <div class="text-lg leading-relaxed" style="color: var(--ink)" v-html="renderedContent"></div>
 
     <!-- Sources -->
     <div v-if="message.role === 'assistant' && message.sources?.length" class="mt-4">
@@ -46,8 +46,8 @@ const routeLabel = computed(() => {
 }
 
 .label-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
 }
 .dot-user { background: var(--ink-subtle); }

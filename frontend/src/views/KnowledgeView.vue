@@ -1,9 +1,9 @@
 <template>
   <div class="h-full overflow-y-auto">
-    <div class="max-w-4xl mx-auto px-8 py-12">
+    <div class="max-w-4xl mx-auto px-10 py-14">
       <!-- Page title -->
-      <h1 class="text-3xl mb-2" style="font-family: var(--font-display)">Knowledge Base</h1>
-      <p class="mb-10" style="color: var(--ink-muted)">Upload documents to build your private search index. The Agent retrieves from here when answers need document grounding.</p>
+      <h1 class="text-4xl mb-3" style="font-family: var(--font-display)">Knowledge Base</h1>
+      <p class="text-lg mb-12 max-w-2xl" style="color: var(--ink-muted)">Upload documents to build your private search index. The Agent retrieves from here when answers need document grounding.</p>
 
       <!-- Upload -->
       <FileUploader :is-uploading="isUploading" @upload="handleUpload" />

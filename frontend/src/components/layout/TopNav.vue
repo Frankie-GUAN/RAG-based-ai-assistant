@@ -1,5 +1,5 @@
 <template>
-  <nav class="flex items-center justify-between h-14 px-6 shrink-0"
+  <nav class="flex items-center justify-between h-16 px-8 shrink-0"
     style="background: var(--white-warm); border-bottom: 1px solid var(--rule)">
     <!-- Brand -->
     <router-link to="/" class="flex items-center gap-2.5 no-underline group">

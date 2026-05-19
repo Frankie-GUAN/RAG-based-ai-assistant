@@ -4,13 +4,13 @@
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Messages area — generous centered column -->
       <div class="flex-1 overflow-y-auto" ref="msgContainer">
-        <div class="max-w-2xl mx-auto px-8 py-10">
+        <div class="max-w-3xl mx-auto px-10 py-12">
           <!-- Empty state -->
           <div v-if="messages.length === 0" class="flex flex-col items-center justify-center" style="min-height: 60vh">
-            <p class="text-5xl mb-6" style="font-family: var(--font-display); color: var(--ink)">
+            <p class="text-6xl mb-8" style="font-family: var(--font-display); color: var(--ink); line-height: 1.15">
               What do you <span style="color: var(--clay); font-style: italic">need</span><br />to know today?
             </p>
-            <p class="text-base max-w-md text-center leading-relaxed" style="color: var(--ink-muted)">
+            <p class="text-lg max-w-lg text-center leading-relaxed" style="color: var(--ink-muted)">
               Ask a question. The Agent will search your documents, the web, or reason directly.
             </p>
           </div>
@@ -25,19 +25,19 @@
 
           <!-- Streaming content -->
           <div v-if="streamingContent" class="py-5">
-            <p class="text-base leading-relaxed" style="color: var(--ink)">
+            <p class="text-lg leading-relaxed" style="color: var(--ink)">
               {{ streamingContent }}<span class="cursor-blink"></span>
             </p>
           </div>
 
           <!-- Bottom spacer for scroll comfort -->
-          <div class="h-8"></div>
+          <div class="h-10"></div>
         </div>
       </div>
 
-      <!-- Input area — floated above bottom with generous padding -->
-      <div class="shrink-0 px-8 pb-8 pt-2">
-        <div class="max-w-2xl mx-auto">
+      <!-- Input area -->
+      <div class="shrink-0 px-10 pb-10 pt-2">
+        <div class="max-w-3xl mx-auto">
           <ChatInput :disabled="isStreaming" @send="handleSend" />
         </div>
       </div>
