@@ -39,7 +39,7 @@ watch(messages, async () => {
 }, { deep: true })
 
 async function handleSend(text: string) {
-  const history = messages.value.slice(-6).map(m => ({ role: m.role, content: m.content }))
+  const history = messages.slice(-6).map(m => ({ role: m.role, content: m.content }))
   await sendMessage(text, history, false)
 }
 </script>

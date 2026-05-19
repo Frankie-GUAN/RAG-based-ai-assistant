@@ -1,14 +1,14 @@
 import { ref } from 'vue'
-import type { ChatMessage } from '../types'
+import { useChatStore } from '../stores/chat'
 
 export function useChat() {
-  const messages = ref<ChatMessage[]>([])
+  const store = useChatStore()
   const isStreaming = ref(false)
   const currentRoute = ref('')
   const streamingContent = ref('')
 
   async function sendMessage(question: string, history: any[], hasDocs: boolean) {
-    messages.value.push({ role: 'user', content: question })
+    store.addMessage({ role: 'user', content: question })
     isStreaming.value = true
     streamingContent.value = ''
 
@@ -34,7 +34,7 @@ export function useChat() {
         if (line.startsWith('data: ')) {
           const data = JSON.parse(line.slice(6))
           if (data.answer) {
-            messages.value.push({
+            store.addMessage({
               role: 'assistant',
               content: data.answer,
               sourceType: data.route === 'web' ? 'web' : data.route === 'rag' ? 'doc' : undefined,
@@ -56,8 +56,8 @@ export function useChat() {
   }
 
   function clearMessages() {
-    messages.value = []
+    store.clearMessages()
   }
 
-  return { messages, isStreaming, currentRoute, streamingContent, sendMessage, clearMessages }
+  return { messages: store.messages, isStreaming, currentRoute, streamingContent, sendMessage, clearMessages }
 }
