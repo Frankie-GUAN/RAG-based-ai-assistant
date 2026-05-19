@@ -47,7 +47,7 @@ class Settings(BaseSettings):
         return self.reranker_model
 
     class Config:
-        env_file = ".env"
+        env_file = str(Path(__file__).resolve().parent.parent.parent / ".env")
         env_file_encoding = "utf-8"
 
 
