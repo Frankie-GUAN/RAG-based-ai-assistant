@@ -1,7 +1,12 @@
 <template>
-  <div v-if="isStreaming" class="flex items-center gap-2 px-4 py-2 text-xs text-gray-400">
-    <span class="inline-block w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>
-    <span>{{ label }}</span>
+  <div v-if="isStreaming" class="flex items-center gap-3 px-1 py-3">
+    <!-- Breathing dot ring -->
+    <div class="flex items-center gap-1.5">
+      <span class="dot" style="animation-delay: 0ms"></span>
+      <span class="dot" style="animation-delay: 150ms"></span>
+      <span class="dot" style="animation-delay: 300ms"></span>
+    </div>
+    <span class="text-xs tracking-wide" style="color: var(--page-dim)">{{ label }}</span>
   </div>
 </template>
 
@@ -11,12 +16,25 @@ import { computed } from 'vue'
 const props = defineProps<{ route: string; isStreaming: boolean }>()
 
 const label = computed(() => {
-  if (!props.isStreaming) return ''
   const map: Record<string, string> = {
-    'web': '正在联网搜索...',
-    'rag': '正在检索文档...',
-    'direct': '正在生成回答...',
+    'web': 'Searching the web…',
+    'rag': 'Retrieving documents…',
+    'direct': 'Reasoning…',
   }
-  return map[props.route] || '思考中...'
+  return map[props.route] || 'Thinking…'
 })
 </script>
+
+<style scoped>
+.dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brass);
+  animation: breathe 1.2s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
+  30% { opacity: 1; transform: scale(1.3); }
+}
+</style>

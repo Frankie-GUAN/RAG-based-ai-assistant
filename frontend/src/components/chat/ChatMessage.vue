@@ -1,13 +1,17 @@
 <template>
-  <div class="py-3" :class="message.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
-    <div
-      class="max-w-[75%] rounded-xl px-4 py-3 text-sm leading-relaxed"
-      :class="message.role === 'user'
-        ? 'bg-amber-500 text-white'
-        : 'bg-white border border-gray-200 text-gray-800'"
+  <div class="py-2.5" :class="message.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+    <div class="max-w-[72%] rounded-2xl px-5 py-3 text-sm leading-relaxed"
+      :class="message.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
     >
+      <!-- Role label -->
+      <div class="text-[10px] uppercase tracking-widest mb-1.5 opacity-50">
+        {{ message.role === 'user' ? 'You' : 'RAG Agent' }}
+      </div>
+
       <div v-html="renderedContent"></div>
-      <SourcePanel v-if="message.sources?.length" :sources="message.sources" :source-type="message.sourceType" />
+
+      <SourcePanel v-if="message.sources?.length && message.role === 'assistant'"
+        :sources="message.sources" :source-type="message.sourceType" />
     </div>
   </div>
 </template>
@@ -23,3 +27,17 @@ const renderedContent = computed(() => {
   return props.message.content.replace(/\n/g, '<br>')
 })
 </script>
+
+<style scoped>
+.user-bubble {
+  background: linear-gradient(135deg, var(--brass-dim) 0%, #6b3f1e 100%);
+  color: #f0d8b8;
+  border-bottom-right-radius: 6px;
+}
+.assistant-bubble {
+  background: var(--ink-muted);
+  border: 1px solid var(--border-light);
+  color: var(--page);
+  border-bottom-left-radius: 6px;
+}
+</style>

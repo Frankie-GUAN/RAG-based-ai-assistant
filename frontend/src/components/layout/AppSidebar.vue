@@ -1,31 +1,54 @@
 <template>
-  <aside class="w-56 bg-white border-r border-gray-200 flex flex-col">
-    <div class="p-4 border-b border-gray-100">
-      <h1 class="text-lg font-semibold text-gray-800">Agentic RAG</h1>
-      <p class="text-xs text-gray-400 mt-0.5">智能问答平台</p>
+  <aside class="w-60 flex flex-col shrink-0" style="background: var(--ink-soft); border-right: 1px solid var(--border)">
+    <!-- Brand -->
+    <div class="px-5 py-5" style="border-bottom: 1px solid var(--border)">
+      <h1 class="text-xl tracking-wide" style="color: var(--page)">
+        Agentic <span style="color: var(--brass)">RAG</span>
+      </h1>
+      <p class="mt-1 text-xs tracking-wider uppercase" style="color: var(--page-faint)">Knowledge Engine</p>
     </div>
-    <nav class="flex-1 p-3 space-y-1">
+
+    <!-- Nav -->
+    <nav class="flex-1 px-3 py-4 space-y-1">
       <router-link
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
-        class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors"
-        active-class="bg-amber-50 text-amber-700 font-medium"
+        class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 group"
+        :class="$route.path === item.path
+          ? 'active-nav'
+          : 'text-[var(--page-dim)] hover:text-[var(--page)] hover:bg-[var(--ink-muted)]'"
       >
-        <span>{{ item.icon }}</span>
-        <span>{{ item.label }}</span>
+        <span class="text-base transition-transform duration-200 group-hover:scale-110">
+          {{ item.icon }}
+        </span>
+        <span class="font-medium">{{ item.label }}</span>
+        <span v-if="item.shortcut" class="ml-auto text-[10px] opacity-40">{{ item.shortcut }}</span>
       </router-link>
     </nav>
-    <div class="p-3 border-t border-gray-100">
-      <div class="text-xs text-gray-400">Agentic RAG v0.1</div>
+
+    <!-- Footer -->
+    <div class="px-5 py-4" style="border-top: 1px solid var(--border)">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full animate-pulse" style="background: var(--brass)"></span>
+        <span class="text-[11px] tracking-wide" style="color: var(--page-faint)">System Online</span>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
 const navItems = [
-  { path: '/', label: '对话', icon: '💬' },
-  { path: '/knowledge', label: '知识库', icon: '📚' },
-  { path: '/evaluation', label: '评估', icon: '📊' },
+  { path: '/', label: '对话', icon: '◈', shortcut: '⌘1' },
+  { path: '/knowledge', label: '知识库', icon: '⧉', shortcut: '⌘2' },
+  { path: '/evaluation', label: '评估', icon: '⧗', shortcut: '⌘3' },
 ]
 </script>
+
+<style scoped>
+.active-nav {
+  background: var(--brass-wash);
+  color: var(--brass) !important;
+  box-shadow: inset 2px 0 0 var(--brass);
+}
+</style>

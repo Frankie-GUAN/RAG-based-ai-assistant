@@ -1,26 +1,38 @@
 <template>
   <div class="space-y-3">
-    <div v-for="(result, i) in results" :key="i" class="bg-white border border-gray-100 rounded-lg p-4">
-      <p class="text-sm font-medium text-gray-700 mb-1">Q: {{ result.query }}</p>
-      <p class="text-xs text-gray-400 mb-3 line-clamp-2">A: {{ result.answer }}</p>
-      <div class="flex gap-4">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-400">忠实度</span>
-          <div class="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div class="h-full bg-emerald-500 rounded-full transition-all" :style="{ width: (result.faithfulness * 100) + '%' }"></div>
+    <div v-for="(result, i) in results" :key="i"
+      class="rounded-xl p-5 transition-all duration-200"
+      style="background: var(--ink-muted); border: 1px solid var(--border)"
+    >
+      <p class="text-sm font-medium mb-1" style="color: var(--page)">Q: {{ result.query }}</p>
+      <p class="text-xs line-clamp-2 mb-4" style="color: var(--page-faint)">A: {{ result.answer }}</p>
+
+      <div class="flex gap-6">
+        <!-- Faithfulness -->
+        <div class="flex-1">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[11px] uppercase tracking-wider" style="color: var(--page-dim)">Faithfulness</span>
+            <span class="text-xs font-medium tabular-nums" :style="{ color: result.faithfulness >= 0.7 ? '#7c9a6e' : '#c0655e' }">
+              {{ (result.faithfulness * 100).toFixed(0) }}%
+            </span>
           </div>
-          <span class="text-xs font-medium" :class="result.faithfulness >= 0.7 ? 'text-emerald-600' : 'text-red-500'">
-            {{ (result.faithfulness * 100).toFixed(0) }}%
-          </span>
+          <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--ink)">
+            <div class="h-full rounded-full transition-all duration-700 ease-out"
+              :style="{ width: (result.faithfulness * 100) + '%', background: result.faithfulness >= 0.7 ? '#7c9a6e' : '#c0655e' }"></div>
+          </div>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-400">相关性</span>
-          <div class="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div class="h-full bg-blue-500 rounded-full transition-all" :style="{ width: (result.answer_relevancy * 100) + '%' }"></div>
+        <!-- Relevancy -->
+        <div class="flex-1">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[11px] uppercase tracking-wider" style="color: var(--page-dim)">Relevancy</span>
+            <span class="text-xs font-medium tabular-nums" :style="{ color: result.answer_relevancy >= 0.7 ? '#a0875e' : '#c0655e' }">
+              {{ (result.answer_relevancy * 100).toFixed(0) }}%
+            </span>
           </div>
-          <span class="text-xs font-medium" :class="result.answer_relevancy >= 0.7 ? 'text-blue-600' : 'text-red-500'">
-            {{ (result.answer_relevancy * 100).toFixed(0) }}%
-          </span>
+          <div class="h-1.5 rounded-full overflow-hidden" style="background: var(--ink)">
+            <div class="h-full rounded-full transition-all duration-700 ease-out"
+              :style="{ width: (result.answer_relevancy * 100) + '%', background: result.answer_relevancy >= 0.7 ? '#a0875e' : '#c0655e' }"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -29,6 +41,5 @@
 
 <script setup lang="ts">
 import type { EvalResult } from '../../types'
-
 defineProps<{ results: EvalResult[] }>()
 </script>
