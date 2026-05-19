@@ -52,6 +52,7 @@ def web_search_node(state: AgentState) -> dict:
 def generate_node(state: AgentState) -> dict:
     llm = _get_llm()
     context = state.get("context", "")
+    summary = state.get("summary", "")
     history = "\n".join(
         f"{'用户' if isinstance(m, HumanMessage) else '助手'}: {m.content}"
         for m in state["messages"][-6:]
@@ -64,6 +65,9 @@ def generate_node(state: AgentState) -> dict:
         )
     else:
         system_text = "你是专业中文助手，基于自身知识回答问题。若不知道，说明不确定。"
+
+    if summary:
+        system_text += f"\n\n先前对话摘要（请基于此保持对话连续性）:\n{summary}"
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_text),

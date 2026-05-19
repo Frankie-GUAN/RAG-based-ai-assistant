@@ -1,11 +1,14 @@
 import { ref } from 'vue'
 import { useChatStore } from '../stores/chat'
+import { useConversations } from './useConversations'
+import type { ChatMessage } from '../types'
 
 export function useChat() {
   const store = useChatStore()
   const isStreaming = ref(false)
   const currentRoute = ref('')
   const streamingContent = ref('')
+  const { fetchConversations, loadConversation } = useConversations()
 
   async function sendMessage(question: string, history: any[], hasDocs: boolean) {
     store.addMessage({ role: 'user', content: question })
@@ -15,7 +18,12 @@ export function useChat() {
     const response = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, history, has_docs: hasDocs }),
+      body: JSON.stringify({
+        conversation_id: store.conversationId,
+        question,
+        history,
+        has_docs: hasDocs,
+      }),
     })
 
     const reader = response.body!.getReader()
@@ -46,6 +54,10 @@ export function useChat() {
           } else if (data.route) {
             currentRoute.value = data.route
           }
+          // Capture conversation_id from done event for new conversations
+          if (data.conversation_id && !store.conversationId) {
+            store.setConversationId(data.conversation_id)
+          }
         }
       }
     }
@@ -53,11 +65,33 @@ export function useChat() {
     isStreaming.value = false
     currentRoute.value = ''
     streamingContent.value = ''
+
+    // Refresh sidebar to show updated conversation
+    fetchConversations()
+  }
+
+  async function loadConversationHistory(id: number) {
+    const detail = await loadConversation(id)
+    const chatMessages: ChatMessage[] = detail.messages.map(m => ({
+      role: (m.role as 'user' | 'assistant'),
+      content: m.content,
+      sourceType: (m.source_type as 'web' | 'doc') || undefined,
+    }))
+    store.loadMessages(chatMessages)
+    store.setConversationId(id)
   }
 
   function clearMessages() {
     store.clearMessages()
   }
 
-  return { messages: store.messages, isStreaming, currentRoute, streamingContent, sendMessage, clearMessages }
+  return {
+    messages: store.messages,
+    isStreaming,
+    currentRoute,
+    streamingContent,
+    sendMessage,
+    loadConversationHistory,
+    clearMessages,
+  }
 }

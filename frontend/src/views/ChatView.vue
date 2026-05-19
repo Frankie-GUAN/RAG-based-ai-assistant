@@ -1,5 +1,16 @@
 <template>
   <div class="flex h-full">
+    <!-- Conversation sidebar -->
+    <ConversationSidebar
+      :conversations="store.conversations"
+      :active-id="store.conversationId"
+      :loading="store.conversationsLoading"
+      @select="onSelectConversation"
+      @delete="onDeleteConversation"
+      @new-chat="onNewChat"
+      @rename="onRenameConversation"
+    />
+
     <!-- Main conversation column -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Messages area — generous centered column -->
@@ -67,15 +78,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted } from 'vue'
 import { useChat } from '../composables/useChat'
+import { useConversations } from '../composables/useConversations'
+import { useChatStore } from '../stores/chat'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatInput from '../components/chat/ChatInput.vue'
 import AgentThinking from '../components/chat/AgentThinking.vue'
+import ConversationSidebar from '../components/chat/ConversationSidebar.vue'
 
-const { messages, isStreaming, currentRoute, streamingContent, sendMessage } = useChat()
+const { messages, isStreaming, currentRoute, streamingContent, sendMessage, loadConversationHistory, clearMessages } = useChat()
+const { fetchConversations, deleteConversation, renameConversation } = useConversations()
+const store = useChatStore()
 const msgContainer = ref<HTMLElement>()
 const showContext = ref(false)
+
+onMounted(() => {
+  fetchConversations()
+})
 
 const contextItems = computed(() => {
   return messages
@@ -101,6 +121,26 @@ watch(streamingContent, async () => {
 async function handleSend(text: string) {
   const history = messages.slice(-6).map(m => ({ role: m.role, content: m.content }))
   await sendMessage(text, history, false)
+}
+
+async function onSelectConversation(id: number) {
+  await loadConversationHistory(id)
+}
+
+async function onDeleteConversation(id: number) {
+  await deleteConversation(id)
+  if (store.conversationId === id) {
+    clearMessages()
+  }
+}
+
+async function onRenameConversation(id: number, title: string) {
+  await renameConversation(id, title)
+  fetchConversations()
+}
+
+function onNewChat() {
+  clearMessages()
 }
 </script>
 
