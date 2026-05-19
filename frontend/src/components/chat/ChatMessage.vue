@@ -1,19 +1,23 @@
 <template>
-  <div class="py-2.5" :class="message.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
-    <div class="max-w-[72%] rounded-2xl px-5 py-3 text-sm leading-relaxed"
-      :class="message.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
-    >
-      <!-- Role label -->
-      <div class="text-[10px] uppercase tracking-widest mb-1.5 opacity-50">
+  <article class="py-5" :class="message.role === 'user' ? 'user-msg' : 'assistant-msg'">
+    <!-- Label -->
+    <div class="flex items-center gap-2 mb-2">
+      <span class="label-dot" :class="message.role === 'user' ? 'dot-user' : 'dot-assistant'"></span>
+      <span class="text-xs font-semibold uppercase tracking-widest" style="font-family: var(--font-body)"
+        :style="{ color: message.role === 'user' ? 'var(--ink-muted)' : 'var(--clay)' }">
         {{ message.role === 'user' ? 'You' : 'RAG Agent' }}
-      </div>
-
-      <div v-html="renderedContent"></div>
-
-      <SourcePanel v-if="message.sources?.length && message.role === 'assistant'"
-        :sources="message.sources" :source-type="message.sourceType" />
+      </span>
+      <span class="text-[10px] tracking-wide opacity-30">{{ message.role === 'assistant' && message.sourceType ? routeLabel : '' }}</span>
     </div>
-  </div>
+
+    <!-- Content — larger type for readability -->
+    <div class="text-base leading-relaxed" style="color: var(--ink)" v-html="renderedContent"></div>
+
+    <!-- Sources -->
+    <div v-if="message.role === 'assistant' && message.sources?.length" class="mt-4">
+      <SourcePanel :sources="message.sources" />
+    </div>
+  </article>
 </template>
 
 <script setup lang="ts">
@@ -23,21 +27,29 @@ import SourcePanel from './SourcePanel.vue'
 
 const props = defineProps<{ message: ChatMessage }>()
 
-const renderedContent = computed(() => {
-  return props.message.content.replace(/\n/g, '<br>')
+const renderedContent = computed(() => props.message.content.replace(/\n/g, '<br>'))
+
+const routeLabel = computed(() => {
+  const m: Record<string, string> = { web: 'via Web Search', doc: 'via Documents' }
+  return m[props.message.sourceType || ''] || ''
 })
 </script>
 
 <style scoped>
-.user-bubble {
-  background: linear-gradient(135deg, var(--brass-dim) 0%, #6b3f1e 100%);
-  color: #f0d8b8;
-  border-bottom-right-radius: 6px;
+.user-msg {
+  padding-left: 0;
+  max-width: 92%;
 }
-.assistant-bubble {
-  background: var(--ink-muted);
-  border: 1px solid var(--border-light);
-  color: var(--page);
-  border-bottom-left-radius: 6px;
+.assistant-msg {
+  padding-left: 0;
+  max-width: 100%;
 }
+
+.label-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.dot-user { background: var(--ink-subtle); }
+.dot-assistant { background: var(--clay); }
 </style>

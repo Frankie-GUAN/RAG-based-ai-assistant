@@ -1,6 +1,6 @@
 <template>
-  <div class="flex h-screen" style="background: var(--ink)">
-    <AppSidebar />
+  <div class="flex flex-col h-screen" style="background: var(--paper)">
+    <TopNav />
     <main class="flex-1 overflow-hidden">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
@@ -12,20 +12,14 @@
 </template>
 
 <script setup lang="ts">
-import AppSidebar from './components/layout/AppSidebar.vue'
+import TopNav from './components/layout/TopNav.vue'
 </script>
 
-<style scoped>
+<style>
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 200ms ease, transform 200ms ease;
+  transition: opacity 240ms ease, transform 240ms ease;
 }
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(4px);
-}
-.page-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
-}
+.page-enter-from { opacity: 0; transform: translateY(6px) scale(0.995); }
+.page-leave-to   { opacity: 0; transform: translateY(-4px) scale(0.995); }
 </style>

@@ -1,83 +1,88 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Warm Laboratory — Design System
-   Dark walnut + aged brass. A private research library at midnight.
+   Editorial Research Desk
+   Warm paper · Terracotta accent · Print-quality typography
    ============================================================ */
 
 :root {
-  --ink:        #12110f;
-  --ink-soft:   #1c1a17;
-  --ink-muted:  #262421;
-  --page:       #f0ebe0;
-  --page-dim:   #a09888;
-  --page-faint: #5c5650;
-  --brass:      #d68c3c;
-  --brass-bright: #f0a040;
-  --brass-dim:  #8b5e2f;
-  --brass-wash: rgba(214, 140, 60, 0.08);
-  --brass-glow: rgba(214, 140, 60, 0.18);
-  --border:     #2d2a25;
-  --border-light: #38342e;
-  --radius-sm:  6px;
-  --radius-md:  10px;
-  --radius-lg:  16px;
-  --radius-xl:  24px;
+  /* Surface */
+  --paper:       #faf7f2;
+  --paper-warm:  #f6f2ea;
+  --white:       #ffffff;
+  --white-warm:  #fefcfa;
+
+  /* Ink */
+  --ink:         #1a1815;
+  --ink-soft:    #3d3a35;
+  --ink-muted:   #6b6760;
+  --ink-faint:   #9e9990;
+  --ink-subtle:  #c4bfb8;
+
+  /* Accent — terracotta */
+  --clay:        #c2653d;
+  --clay-deep:   #9e4a2a;
+  --clay-bright: #d4784e;
+  --clay-wash:   #f5ebe4;
+  --clay-glow:   rgba(194, 101, 61, 0.12);
+
+  /* Accent — sage */
+  --sage:        #7c9a6e;
+  --sage-wash:   #edf3ea;
+  --sage-deep:   #5c7a4e;
+
+  /* Accent — slate blue */
+  --slate:       #6b7d8e;
+  --slate-wash:  #eef2f5;
+
+  /* Borders & rules */
+  --rule:        #e8e4de;
+  --rule-light:  #f0ece7;
+  --rule-faint:  #f5f2ee;
+
+  /* Radii */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --r-xl: 20px;
 }
 
 @theme {
-  --font-display: "DM Serif Display", "Noto Serif SC", serif;
-  --font-body: "DM Sans", "Noto Sans SC", sans-serif;
+  --font-display: "Playfair Display", "Noto Serif SC", serif;
+  --font-body: "Source Sans 3", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
 }
 
+/* ---- Base ---- */
 @layer base {
   body {
     font-family: var(--font-body);
-    background: var(--ink);
-    color: var(--page);
+    background: var(--paper);
+    color: var(--ink);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-feature-settings: "kern" 1, "liga" 1;
+    font-weight: 400;
+    line-height: 1.6;
     letter-spacing: 0.005em;
   }
 
-  /* Grain texture overlay */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 9999;
-    opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-
-  /* Typography defaults */
   h1, h2, h3, h4 {
     font-family: var(--font-display);
-    font-weight: 400;
-    letter-spacing: 0.01em;
-    color: var(--page);
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.25;
   }
-
-  a {
-    color: var(--brass);
-    text-decoration: none;
-    transition: color 180ms ease;
-  }
-  a:hover { color: var(--brass-bright); }
 
   ::selection {
-    background: var(--brass-glow);
-    color: var(--page);
+    background: var(--clay-wash);
+    color: var(--clay-deep);
   }
 }
 
 /* ---- Scrollbar ---- */
-::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--page-faint); }
+::-webkit-scrollbar-thumb { background: var(--ink-subtle); border-radius: 2px; }
 
 /* ---- Utilities ---- */
 .line-clamp-2 {
