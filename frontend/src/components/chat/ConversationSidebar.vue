@@ -1,15 +1,15 @@
 <template>
-  <aside class="sidebar" :class="{ collapsed: !visible }">
+  <aside ref="sidebarRoot" class="sidebar" :class="{ collapsed: !visible }">
     <!-- New Chat button -->
     <div class="new-chat-container">
-      <button @click="$emit('newChat')" class="new-chat-btn">
-        <span class="plus-icon">+</span>
+      <button ref="newChatBtn" @click="$emit('newChat')" class="new-chat-btn">
+        <span ref="plusIcon" class="plus-icon">+</span>
         <span>New Chat</span>
       </button>
     </div>
 
     <!-- Conversation list -->
-    <div class="conv-list">
+    <div ref="convListRef" class="conv-list">
       <!-- Loading skeleton -->
       <div v-if="loading" class="space-y-2">
         <div v-for="n in 3" :key="n" class="skeleton-item">
@@ -28,6 +28,7 @@
         <div
           v-for="conv in conversations"
           :key="conv.id"
+          :data-conv-id="conv.id"
           class="conv-item"
           :class="{ active: conv.id === activeId }"
           @click="onSelectConv(conv.id)"
@@ -53,7 +54,7 @@
           </div>
           <button
             class="delete-btn"
-            @click.stop="$emit('delete', conv.id)"
+            @click="onDelete(conv.id, $event)"
             title="Delete conversation"
           >&times;</button>
         </div>
@@ -61,14 +62,15 @@
     </div>
 
     <!-- Toggle -->
-    <button class="toggle-btn" @click="visible = !visible" :title="visible ? 'Collapse' : 'Expand'">
+    <button class="toggle-btn" @click="togglePanel" :title="visible ? 'Collapse' : 'Expand'">
       {{ visible ? '◀' : '▶' }}
     </button>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { gsap } from '../../composables/useGSAP'
 import type { ConversationSummary } from '../../types'
 
 defineProps<{
@@ -88,6 +90,123 @@ const visible = ref(true)
 const editingId = ref<number | null>(null)
 const editTitle = ref('')
 const editInput = ref<HTMLInputElement>()
+
+const sidebarRoot = ref<HTMLElement>()
+const newChatBtn = ref<HTMLElement>()
+const plusIcon = ref<HTMLElement>()
+const convListRef = ref<HTMLElement>()
+
+let ctx: gsap.Context | null = null
+
+/* ---------- GSAP animations ---------- */
+
+onMounted(() => {
+  const root = sidebarRoot.value
+  if (!root) return
+
+  ctx = gsap.context(() => {
+    /* Scoped selector helper */
+    const $ = gsap.utils.selector(root)
+
+    // --- Item hover delegation ---
+    const list = convListRef.value
+    if (list) {
+      // mouseenter doesn't bubble, so use mouseover/mouseout on the container
+      list.addEventListener('mouseover', (e) => {
+        const item = (e.target as HTMLElement).closest('.conv-item') as HTMLElement | null
+        if (!item) return
+        gsap.to(item, { x: 4, duration: 0.2, ease: 'power2.out', overwrite: 'auto' })
+        const delBtn = item.querySelector('.delete-btn') as HTMLElement | null
+        if (delBtn) {
+          gsap.to(delBtn, { opacity: 1, scale: 1, duration: 0.2, ease: 'back.out(1.2)', overwrite: 'auto' })
+        }
+      })
+      list.addEventListener('mouseout', (e) => {
+        const item = (e.target as HTMLElement).closest('.conv-item') as HTMLElement | null
+        if (!item) return
+        // Only animate out if we're not moving to a child of the same item
+        const related = e.relatedTarget as HTMLElement | null
+        if (related && item.contains(related)) return
+        gsap.to(item, { x: 0, duration: 0.2, ease: 'power2.out', overwrite: 'auto' })
+        const delBtn = item.querySelector('.delete-btn') as HTMLElement | null
+        if (delBtn) {
+          gsap.to(delBtn, { opacity: 0, scale: 0.8, duration: 0.2, ease: 'power2.out', overwrite: 'auto' })
+        }
+      })
+    }
+
+    // --- New chat button hover ---
+    const btn = newChatBtn.value
+    const icon = plusIcon.value
+    if (btn && icon) {
+      gsap.set(btn, { borderColor: 'var(--rule)' })
+      btn.addEventListener('mouseenter', () => {
+        gsap.to(icon, { rotate: 90, duration: 0.25, ease: 'power2.out', overwrite: 'auto' })
+        gsap.to(btn, { borderColor: 'var(--clay)', duration: 0.25, ease: 'power2.out', overwrite: 'auto' })
+      })
+      btn.addEventListener('mouseleave', () => {
+        gsap.to(icon, { rotate: 0, duration: 0.25, ease: 'power2.out', overwrite: 'auto' })
+        gsap.to(btn, { borderColor: 'var(--rule)', duration: 0.25, ease: 'power2.out', overwrite: 'auto' })
+      })
+    }
+  }, root)
+
+  // --- Panel open animation ---
+  watch(visible, (val) => {
+    if (val) {
+      const $ = gsap.utils.selector(root)
+      const tl = gsap.timeline()
+      tl.fromTo(root,
+        { x: -280, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.4, ease: 'power3.out', clearProps: 'x' },
+      )
+      tl.fromTo($('.conv-item'),
+        { opacity: 0, x: -20 },
+        { opacity: 1, x: 0, duration: 0.3, stagger: 0.04, ease: 'power2.out', clearProps: 'x' },
+        '-=0.1',
+      )
+      ctx?.add(tl)
+    }
+  })
+})
+
+onUnmounted(() => {
+  ctx?.revert()
+})
+
+/* ---------- Item delete with animation ---------- */
+
+function onDelete(id: number, event: MouseEvent) {
+  event.stopPropagation()
+  const item = (event.currentTarget as HTMLElement).closest('.conv-item') as HTMLElement
+  if (item) {
+    const tl = gsap.timeline({
+      onComplete: () => emit('delete', id),
+    })
+    tl.set(item, { backgroundColor: 'var(--clay-wash)' })
+    tl.to(item, {
+      height: 0,
+      opacity: 0,
+      x: -30,
+      paddingTop: 0,
+      paddingBottom: 0,
+      marginTop: 0,
+      marginBottom: 0,
+      overflow: 'hidden',
+      duration: 0.25,
+      ease: 'power3.in',
+    })
+    ctx?.add(tl)
+  } else {
+    emit('delete', id)
+  }
+}
+
+function togglePanel() {
+  visible.value = !visible.value
+}
+
+/* ---------- Existing logic ---------- */
 
 function onSelectConv(id: number) {
   if (editingId.value !== id) {
@@ -166,13 +285,11 @@ function formatDate(iso: string | null): string {
   font-size: 15px;
   font-weight: 600;
   border-radius: 10px;
-  border: none;
+  border: 1px solid var(--rule);
   cursor: pointer;
   background: var(--clay);
   color: white;
-  transition: opacity 150ms;
 }
-.new-chat-btn:hover { opacity: 0.88; }
 
 .plus-icon {
   font-size: 18px;
@@ -246,10 +363,9 @@ function formatDate(iso: string | null): string {
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 120ms;
+  scale: 0.8;
 }
-.conv-item:hover .delete-btn { opacity: 0.5; }
-.delete-btn:hover { opacity: 1 !important; color: #e53e3e; }
+.delete-btn:hover { color: #e53e3e; }
 
 .empty-state {
   padding: 32px 16px;
