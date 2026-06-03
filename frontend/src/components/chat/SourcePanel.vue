@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import type { Source } from '../../types'
-import gsap from '../../composables/useGSAP'
+import { gsap } from '../../composables/useGSAP'
 
 defineProps<{ sources: Source[] }>()
 

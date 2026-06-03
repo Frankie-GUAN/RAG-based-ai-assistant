@@ -32,7 +32,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
-import gsap from '../../composables/useGSAP'
+import { gsap } from '../../composables/useGSAP'
 defineProps<{ isUploading: boolean }>()
 const emit = defineEmits<{ upload: [file: File] }>()
 const fileInput = ref<HTMLInputElement>()

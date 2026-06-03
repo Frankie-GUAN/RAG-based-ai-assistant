@@ -33,7 +33,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import gsap from '../../composables/useGSAP'
+import { gsap } from '../../composables/useGSAP'
 
 const props = defineProps<{ disabled: boolean }>()
 const emit = defineEmits<{ send: [text: string] }>()

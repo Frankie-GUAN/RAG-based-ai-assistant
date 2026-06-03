@@ -1,5 +1,5 @@
 <template>
-  <div class="h-full overflow-y-auto">
+  <div ref="containerRef" class="h-full overflow-y-auto">
     <div class="max-w-4xl mx-auto px-10 py-14">
       <!-- Page title -->
       <h1 class="text-4xl mb-3" style="font-family: var(--font-display)">Knowledge Base</h1>
@@ -15,9 +15,9 @@
         </h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div v-for="doc in documents" :key="doc.id"
-            class="flex items-center gap-4 p-5 rounded-xl transition-shadow duration-200 hover:shadow-sm"
+            class="doc-card flex items-center gap-4 p-5 rounded-xl transition-shadow duration-200 hover:shadow-sm"
             style="background: var(--white); border: 1px solid var(--rule)">
-            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-sm shrink-0"
+            <div class="doc-badge w-10 h-10 rounded-lg flex items-center justify-center text-sm shrink-0"
               style="background: var(--clay-wash); color: var(--clay)">
               {{ doc.file_type.toUpperCase() }}
             </div>
@@ -37,12 +37,49 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, ref, nextTick } from 'vue'
 import { useKnowledge } from '../composables/useKnowledge'
 import FileUploader from '../components/knowledge/FileUploader.vue'
+import { gsap, ScrollTrigger } from '../composables/useGSAP'
 
 const { documents, isUploading, upload, fetchDocuments } = useKnowledge()
-onMounted(() => fetchDocuments())
+const containerRef = ref<HTMLElement | null>(null)
+let ctx: gsap.Context | null = null
+
+onMounted(async () => {
+  await fetchDocuments()
+  await nextTick()
+
+  ctx = gsap.context(() => {
+    const cards = document.querySelectorAll('.doc-card')
+    if (cards.length) {
+      gsap.from(cards, {
+        opacity: 0, x: -16, rotateY: 8,
+        duration: 0.4, stagger: 0.08, ease: 'power3.out',
+      })
+      gsap.from('.doc-badge', {
+        scale: 0, rotation: -90,
+        duration: 0.3, stagger: 0.08, ease: 'back.out(1.4)',
+      })
+    }
+
+    ScrollTrigger.batch('.doc-card', {
+      onEnter: (elements) => {
+        gsap.fromTo(elements,
+          { opacity: 0, y: 30, rotateX: 8 },
+          { opacity: 1, y: 0, rotateX: 0, duration: 0.5, stagger: 0.08, ease: 'power3.out' }
+        )
+      },
+      start: 'top 85%',
+      once: true,
+    })
+  }, containerRef.value)
+})
+
+onUnmounted(() => {
+  ctx?.revert()
+})
+
 async function handleUpload(file: File) { await upload(file) }
 function formatDate(iso: string) { return new Date(iso).toLocaleDateString('zh-CN') }
 </script>
