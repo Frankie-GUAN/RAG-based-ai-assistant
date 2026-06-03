@@ -73,7 +73,7 @@ onMounted(async () => {
       start: 'top 85%',
       once: true,
     })
-  }, containerRef.value)
+  }, containerRef.value!)
 })
 
 onUnmounted(() => {

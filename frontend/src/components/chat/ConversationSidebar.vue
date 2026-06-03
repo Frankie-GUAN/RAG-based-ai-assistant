@@ -105,8 +105,7 @@ onMounted(() => {
   if (!root) return
 
   ctx = gsap.context(() => {
-    /* Scoped selector helper */
-    const $ = gsap.utils.selector(root)
+    // (selector helper available via gsap.utils.selector if needed)
 
     // --- Item hover delegation ---
     const list = convListRef.value
@@ -165,7 +164,7 @@ onMounted(() => {
         { opacity: 1, x: 0, duration: 0.3, stagger: 0.04, ease: 'power2.out', clearProps: 'x' },
         '-=0.1',
       )
-      ctx?.add(tl)
+      ctx?.add(() => { tl.kill() })
     }
   })
 })
@@ -196,7 +195,7 @@ function onDelete(id: number, event: MouseEvent) {
       duration: 0.25,
       ease: 'power3.in',
     })
-    ctx?.add(tl)
+    // timeline auto-tracked by gsap.context
   } else {
     emit('delete', id)
   }
