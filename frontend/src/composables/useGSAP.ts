@@ -10,7 +10,7 @@ export function initGSAP() {
   // Global reduced-motion support
   const mm = gsap.matchMedia()
   mm.add('(prefers-reduced-motion: reduce)', () => {
-    gsap.defaults({ duration: 0, overwrite: true })
+    gsap.defaults({ duration: 0 })
   })
 
   initialized = true
