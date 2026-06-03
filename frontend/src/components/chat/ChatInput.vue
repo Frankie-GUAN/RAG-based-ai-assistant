@@ -18,7 +18,7 @@
     <div class="flex items-center justify-between px-4 pb-3">
       <span class="text-[10px] tracking-wider opacity-0 transition-opacity"
         :style="{ opacity: focused ? 0.4 : 0 }">Enter to send · Shift+Enter for new line</span>
-      <button type="submit" :disabled="disabled || !input.trim()"
+      <button ref="btnRef" type="submit" :disabled="disabled || !input.trim()"
         class="ml-auto px-4 py-1.5 text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-30"
         style="background: var(--clay); color: white">
         <span v-if="!disabled">Send</span>
@@ -33,6 +33,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import gsap from '../../composables/useGSAP'
 
 const props = defineProps<{ disabled: boolean }>()
 const emit = defineEmits<{ send: [text: string] }>()
@@ -40,6 +41,7 @@ const emit = defineEmits<{ send: [text: string] }>()
 const input = ref('')
 const focused = ref(false)
 const inputEl = ref<HTMLTextAreaElement>()
+const btnRef = ref<HTMLElement>()
 
 onMounted(() => inputEl.value?.focus())
 
@@ -52,6 +54,12 @@ function autoResize() {
 
 function submit() {
   if (!input.value.trim() || props.disabled) return
+  // Animate send button
+  if (btnRef.value) {
+    gsap.timeline()
+      .to(btnRef.value, { backgroundColor: 'var(--clay-bright)', scale: 0.95, duration: 0.15, ease: 'power2.in' })
+      .to(btnRef.value, { backgroundColor: 'var(--clay)', scale: 1, duration: 0.3, ease: 'back.out(1.3)' })
+  }
   emit('send', input.value.trim())
   input.value = ''
   const el = inputEl.value
