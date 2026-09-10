@@ -436,7 +436,7 @@ cost > θ  → 上云       cost ≤ θ → 端侧执行
 
 ### 6.0 工期现实性说明
 
-各任务按「熟练开发者全职投入」估算，累计工作量约 **59.5 人日（≈ 12 周）**，超出最初的 8 周窗口约 50%。因此不把 8 周当作硬承诺，而是把 P0/P1/P2 当作**优先级分层**：
+各任务按「熟练开发者全职投入」估算，累计工作量约 **60 人日（≈ 12 周）**，超出最初的 8 周窗口约 50%。因此不把 8 周当作硬承诺，而是把 P0/P1/P2 当作**优先级分层**：
 
 | 交付档位 | 范围 | 实际工期 |
 |---|---|---|
@@ -457,14 +457,29 @@ cost > θ  → 上云       cost ≤ θ → 端侧执行
 
 ### P0（第 1–3.5 周）：兑现承诺，消灭硬伤
 
+**实施顺序说明**（与设计章节的编号不同，按依赖关系重排）：
+
+- **协议先行**。§4.1 的 `AgentEvent` 协议原本被排在 P2（任务 11），但 P0 的三个任务都要用它：MCP 工具层要发 `tool_call` / `tool_result`，ReAct 循环要发 `thought` / `plan` / `reflect`，流式要发 `token`。因此在 P0 先实现 **Python 端**协议，P2 任务 11 只负责 **TS 端**实现同一契约。
+- **工具层先于 Agent Core**。ReAct 循环依赖结构化的工具返回与错误语义，先改工具层可避免返工。
+- **上下文引擎先于 Agent Core**。Agent Core 的第一件事就是装配上下文，引擎后做会导致返工。
+- **流式排在 Agent Core 之后**。LLM 调用点会被 Agent Core 重写，先做流式等于做两遍。
+
 | # | 任务 | 工期 |
 |---|---|---|
-| 1 | 真流式 SSE（直通 LLM stream，移除 4 字符分片） | 2d |
-| 2 | 真 MCP 工具层（MCP Server + Agent 作 Client） | 5d |
-| 3 | Agent Core：ReAct + tool-calling loop + 并行调用 + 重试 | 7d |
-| 4 | 上下文工程引擎 | 3d |
-| 5 | 清理死依赖（移除 gemini 包；`ragas` 启用或删除） | 0.5d |
-| | **小计** | **17.5d** |
+| 1 | 清理死依赖 + 锁定依赖版本（并补上缺失的 pytest） | 1d |
+| 2 | **Agent 协议（Python 端）**：`AgentEvent` 类型 + 序列化 | 1d |
+| 3 | 上下文工程引擎（分层 token 预算 + 拼装） | 3d |
+| 4 | 真 MCP 工具层（MCP Server + Agent 作 Client） | 5d |
+| 5 | Agent Core：ReAct + tool-calling loop + 并行调用 + 重试 | 6d |
+| 6 | 真流式 SSE（直通 LLM stream，移除 4 字符分片） | 2d |
+| | **小计** | **18d** |
+
+**已验证的技术前提**（2026-09-10 实测）：
+
+- `mcp` 当前版本为 **2.2.0**，高层类名为 `MCPServer`（**不是** `FastMCP`），导出路径 `from mcp.server import MCPServer`
+- 类型定义已拆分至独立包 `mcp-types`；2.x 中字段为 snake_case（`input_schema` / `is_error` / `structured_content`）
+- 端侧与工具需**同进程**运行：BGE-M3 体积约 2GB，若工具跑在独立进程会再加载一份模型。因此采用 `InMemoryTransport`（`mcp.client._memory`）而非 stdio 子进程
+- **MCP 会向客户端隐藏工具异常细节**：调用失败时客户端只拿到 `is_error=True` 与通用文案 `"Error executing tool X"`，真实异常仅记录在服务端。这直接影响设计——工具失败必须作为**成功返回**携带 `{ok: false, error: ...}`，否则 Agent 无法据此决策
 
 ### P1（第 4–8 周）：Agent 能力纵深
 
@@ -481,13 +496,13 @@ cost > θ  → 上云       cost ≤ θ → 端侧执行
 
 | # | 任务 | 工期 |
 |---|---|---|
-| 11 | Agent 协议 + 端侧 TS Runtime（Web Worker） | 7d |
+| 11 | 端侧 TS Runtime（Web Worker）：**实现 P0 任务 2 已定义的 `AgentEvent` 协议的 TS 端** | 7d |
 | 12 | Edge-Cloud Router + 端侧向量检索 + 离线降级 | 5d |
 | 13 | 评测 v2：Golden Set + 四层指标 + CI 回归 | 5d |
 | 14 | Trace 可观测 UI（执行链路回放） | 3d |
 | | **小计** | **20d** |
 
-**总计：59.5 人日**（P0 17.5 + P1 22 + P2 20）
+**总计：60 人日**（P0 18 + P1 22 + P2 20）
 
 ---
 
