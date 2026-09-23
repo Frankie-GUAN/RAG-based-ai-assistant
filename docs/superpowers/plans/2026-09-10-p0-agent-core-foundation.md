@@ -265,8 +265,28 @@ pytest was never installed, so the 4 existing test files could not run."
 - Modify: `backend/tests/test_hybrid_search.py`
 - Modify: `README.md`
 - Create: `backend/tests/test_retrieval_singletons.py`
+- Modify: `backend/tests/conftest.py`（追加 autouse fixture，关掉 `preload_models`）
 
-- [ ] **Step 1: 在 `backend/app/config.py` 的 `Settings` 类中追加配置**
+> **本任务已交付（2026-09-24），下面的代码块是**原始规范**，不要照抄。**
+> 最终代码以 `backend/app/rag/*.py` 与 `backend/tests/*` 为准 —— 实现经过两轮评审加固，照抄下面的代码块会**重新引入已修复的问题**：
+>
+> | 位置 | 原始规范里的问题 | 已改为 |
+> |---|---|---|
+> | Step 4 `get_retriever` | `k or settings.hybrid_top_k` 把 0 当「没传」 | `if k is None`；并注明 chromadb 1.5.9 接受 k=0 构造、但在 `invoke` 时抛 `TypeError` |
+> | Step 4 `add_documents` | `assert vectorstore is not None`（`python -O` 下被剥掉） | 显式 `raise RuntimeError`；`get_retriever` 补返回标注 |
+> | Step 5 `load()` | 只捕 `UnpicklingError/EOFError/OSError` | 宽到 `Exception` —— pickle 里嵌的是**活的** BM25Okapi/Document，rank_bm25 升级、类改名、dict 结构变更抛的是 `AttributeError`/`KeyError`，窄元组接不住 |
+> | Step 5 `load()` | 静默 `return False` 之后单例把**空索引固化**，下次上传的 `add()` 会用空基础覆盖磁盘 —— 2196 篇变 1 篇，而仓库里没有从 Chroma 重建的路径 | `add()` 在 `_load_failed` 时拒绝落盘；`get_bm25_index()` 以 30s 节流重试 |
+> | Step 5 `save()` | 直接 `open(index_path, "wb")` 就地覆盖 | 先写 `<name>.<pid>.tmp` 再 `os.replace`（原子；带 pid 才不会两个进程互 rename） |
+> | Step 5 `build()` | `if corpus else None` —— `corpus == [[]]` 是**真值**，`BM25Okapi` 会 `ZeroDivisionError`（空 PDF 页走上传接口可达） | `if any(corpus)` |
+> | Step 5 `_documents` / `_index` 属性 | 死代码，且每次访问都重读 `_pair`，看着原子其实不是 | 已删除（保留 `document_count`） |
+> | Step 5/10 的 `top_k` | 负数走切片 `[:-1]`，含义是「除最后一个之外的全部」 | 三处（`_vector_search`/`BM25Index.search`/`_rrf_fuse`）统一为 `top_k <= 0 → []` |
+> | Step 10 `hybrid_search` | `or` 默认值同样把 0 当「没传」 | `if x is None` |
+> | Step 12 `main.py` | 预载无异常处理 —— 检索层故障会让整个 API 起不来 | `try/except Exception`，降级为「首次请求时重试」 |
+> | Step 3 的 Expected | 声称测试全红；实际 `test_bm25_search_is_safe_while_rebuilding` 修复前**就是绿的** | 见 Step 3 的修订说明 |
+> | Step 2 的那个用例 | 只跑增长式重建，触发不了旧实现的失配 | 追加**收缩式**重建（失配方向才会翻转），并补了损坏文件恢复、空白语料、负数 `top_k` 等用例 |
+> | Step 8 的测试 | 把 `hybrid_top_k` patch 成 **10**，而 10 就是默认值 —— 测不出写死字面量 | patch 成 **7** |
+
+- [x] **Step 1: 在 `backend/app/config.py` 的 `Settings` 类中追加配置**
 
 插入到 `reranker_model` 之后：
 
@@ -276,7 +296,7 @@ pytest was never installed, so the 4 existing test files could not run."
     preload_models: bool = True
 ```
 
-- [ ] **Step 2: 写失败的测试 `backend/tests/test_retrieval_singletons.py`**
+- [x] **Step 2: 写失败的测试 `backend/tests/test_retrieval_singletons.py`**
 
 **全部 monkeypatch 掉真实模型类**，因此不下载 BGE-M3（约 2GB），属于可 CI 的轻量层 —— 与 Task 7 用 `ScriptedChatModel` 替代真实 LLM 是同一套思路。
 
@@ -421,16 +441,18 @@ def test_reranker_is_singleton(monkeypatch):
     assert len(constructions) == 1
 ```
 
-- [ ] **Step 3: 运行测试，确认失败**
+- [x] **Step 3: 运行测试，确认失败**
 
 ```bash
 cd backend
 ../.venv/Scripts/python.exe -m pytest tests/test_retrieval_singletons.py -v
 ```
 
-Expected: FAIL —— `AttributeError: module 'app.rag.vector_store' has no attribute ...` 或 `ImportError: cannot import name 'get_bm25_index'`
+Expected: **4 failed, 1 passed** —— 未实现的 `get_bm25_index` / `get_reranker` 报 AttributeError，并发单例断言失败。
 
-- [ ] **Step 4: 重写 `backend/app/rag/vector_store.py` 的加载部分**
+**注意那 1 passed**：`test_bm25_search_is_safe_while_rebuilding` 修复前就是绿的，不是先红后绿的回归测试。旧实现先写 `_documents` 再写 `_index`，而 `add()` 只追加、索引只增不减，所以「index 比 documents 长」这个致命失配方向不可达。它是不变量护栏。真正让它变红需要在重建里加入**收缩**段 —— 文档数变少时失配才翻转，实测增长段 0/9 触发、加上收缩段 9/9 触发 `IndexError`。本步之后的测试文件已按此加强。
+
+- [x] **Step 4: 重写 `backend/app/rag/vector_store.py` 的加载部分**
 
 ```python
 import threading
@@ -517,7 +539,7 @@ def get_retriever(k: int | None = None):
 
 注意：`Chroma.from_documents(...)` 的旧分支已消失 —— 对空集合调用 `add_documents` 等价且更简单。同时删掉 `load_vectorstore`（`knowledge_service.py` 曾导入它但从未调用）。
 
-- [ ] **Step 5: 重写 `backend/app/rag/bm25_index.py` 的并发与单例部分**
+- [x] **Step 5: 重写 `backend/app/rag/bm25_index.py` 的并发与单例部分**
 
 要点是 `build()` **整体替换** `(documents, index)` 元组，`search()` 开头快照一次。引用赋值在 CPython 下是原子的，因此读路径无需加锁（加了会把并发检索串行化）。
 
@@ -610,7 +632,7 @@ def get_bm25_index() -> BM25Index:
     return _bm25
 ```
 
-- [ ] **Step 6: 给 `backend/app/rag/reranker.py` 加单例**
+- [x] **Step 6: 给 `backend/app/rag/reranker.py` 加单例**
 
 ```python
 _reranker: "Reranker | None" = None
@@ -633,7 +655,7 @@ def get_reranker() -> "Reranker":
 
 并在文件顶部补 `import threading`。
 
-- [ ] **Step 7: 让两条建索引路径共用单例**
+- [x] **Step 7: 让两条建索引路径共用单例**
 
 `backend/app/services/knowledge_service.py` 里把
 
@@ -669,7 +691,7 @@ def search_documents(query: str, top_k: int = 4) -> str:
 
 顺带把 `backend/app/services/knowledge_service.py` 与 `backend/app/tools/document_parser.py` 里重复的「load → extend → build → save」逻辑删掉 —— 这正是 CLAUDE.md 里记的「两条建索引路径可能分叉」的根源，现在只剩 `add()` 一处。
 
-- [ ] **Step 8: 在 `backend/tests/test_hybrid_search.py` 追加失败的测试**
+- [x] **Step 8: 在 `backend/tests/test_hybrid_search.py` 追加失败的测试**
 
 该文件已存在（3 条 `_rrf_fuse` 用例），直接追加：
 
@@ -703,14 +725,16 @@ def test_vector_side_requests_hybrid_top_k(monkeypatch):
         return _EmptyRetriever()
 
     monkeypatch.setattr(hybrid_mod, "get_retriever", _fake_get_retriever)
-    monkeypatch.setattr(hybrid_mod.settings, "hybrid_top_k", 10, raising=False)
+    # 刻意用 7，而不是 app/config.py 里的默认值 10：否则 `vector_top_k or 10`
+    # 这种写死字面量的回归也能骗过断言
+    monkeypatch.setattr(hybrid_mod.settings, "hybrid_top_k", 7, raising=False)
 
     hybrid_mod.hybrid_search("劳动合同如何解除", _EmptyBM25())
 
-    assert requested["k"] == 10
+    assert requested["k"] == 7
 ```
 
-- [ ] **Step 9: 运行测试，确认失败**
+- [x] **Step 9: 运行测试，确认失败**
 
 ```bash
 cd backend
@@ -719,7 +743,7 @@ cd backend
 
 Expected: 1 failed, 3 passed —— 新用例拿到 `k=None`，因为 `_vector_search` 从未把 `top_k` 传给 retriever
 
-- [ ] **Step 10: 修正 `backend/app/rag/hybrid_search.py`**
+- [x] **Step 10: 修正 `backend/app/rag/hybrid_search.py`**
 
 `_vector_search` 必须把 `top_k` 传下去；`hybrid_search` 的三个默认值改从配置读取，让 `hybrid_top_k`（每路召回的候选数）与 `top_k`（最终返回数）各司其职。
 
@@ -753,7 +777,7 @@ def hybrid_search(
 
 注意调用方 `document_search.search_documents(query, top_k=4)` 仍显式传 `final_top_k`，返回条数不变 —— 变的只是**候选池**从 4 扩到 10。
 
-- [ ] **Step 11: 运行测试，确认通过**
+- [x] **Step 11: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -762,7 +786,7 @@ cd backend
 
 Expected: 4 passed
 
-- [ ] **Step 12: 在 `backend/app/main.py` 的 lifespan 中预热**
+- [x] **Step 12: 在 `backend/app/main.py` 的 lifespan 中预热**
 
 ```python
 import asyncio
@@ -795,11 +819,11 @@ async def lifespan(app: FastAPI):
     yield
 ```
 
-- [ ] **Step 13: 修正 README 关于 reranker 的措辞**
+- [x] **Step 13: 修正 README 关于 reranker 的措辞**
 
 README 的架构图画了 `Cross-Encoder Reranker → Top-4` 这一级，但查询链路从不调用它。**本轮不接线**（理由见 Step 6），所以必须把这条宣称改成实话 —— 在 README 的架构图与「项目亮点」里把它标注为「已实现、未启用，P1 接入并附检索指标」。
 
-- [ ] **Step 14: 运行测试，确认通过**
+- [x] **Step 14: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -808,7 +832,7 @@ cd backend
 
 Expected: 5 passed
 
-- [ ] **Step 15: 手工确认收益**
+- [x] **Step 15: 手工确认收益**
 
 ```bash
 cd backend
@@ -823,7 +847,7 @@ print(f'首次 {t1-t0:.2f}s / 二次 {t2-t1:.4f}s')
 
 Expected: 二次调用接近 0（改造前实测 2.29s）
 
-- [ ] **Step 16: Commit**
+- [x] **Step 16: Commit**
 
 ```bash
 git add -A backend/app backend/tests README.md
@@ -3708,3 +3732,10 @@ Expected: `干净`
 - **依赖仍全部是 `>=` 下限**，仅 `mcp==2.2.0` 被钉死。属 backlog
 - **`docker-compose.yml` 的 MySQL root 密码硬编码默认值 `ragagent123`**（Task 10 Step 1c 只修了 LLM key 与 SerpAPI key 的透传）。属 backlog
 - **`.env` 内的 DeepSeek key 建议轮换**：它从未被提交（`.gitignore` 已覆盖），但在排查过程中被读取过
+- **「BM25 索引是可重建的缓存」目前是空头支票**（Task 2 交付时发现）：仓库里**没有**从 Chroma 重建 BM25 的路径。Task 2 为此加了护栏（加载失败时 `add()` 拒绝落盘，避免用空基础覆盖唯一副本），但真正的修复是写出重建路径 —— 它天然属于跨存储一致性那件事
+- **Chroma 与 BM25 之间没有事务**：`vector_store.add_documents()` 先写 Chroma，随后的 BM25 写入若失败，就留下「Chroma 有、BM25 无」的分叉，而此时 `DocumentModel` 行尚未插入，没有可据以对账的记录。Task 7 起工具会被并发调用，这个窗口会变成常态
+- **`os.replace` 在 Win32 上遇到被占用的目标文件会抛 `PermissionError`**（实测 150/150），此时旧索引完好、只是本次落盘失败。单进程不可达（`get_bm25_index` 在同一把锁内 load）；跑 `uvicorn --workers N` 共享 `data/` 时才需要重试与退避
+- **`rank-bm25` 未钉版本**（`>=0.2.2`，实装 0.2.2）：pickle 里嵌着活的 `BM25Okapi`，升级会让磁盘索引失效（Task 2 已让这条路径降级而不是崩掉）；测试里对 BM25 分数的精确值断言也依赖它的 idf 数学实现
+- **重复上传同一份文件会重复入库**：Chroma 与 BM25 双向都会再加一遍，无去重
+- **`langchain_community.vectorstores.Chroma` 已是弃用导入**（提示迁移到 `langchain-chroma`），Task 2 动了那处构造函数但未迁移
+- **BM25 小语料陷阱**（写测试时反复踩到，已在测试注释里记）：`idf = log((N-df+0.5)/(df+0.5))`，只有 `df < N/2` 才为正；`df == N` 或 `N == 1` 时 idf 为负，被 epsilon 地板压成非正，`search()` 里 `score > 0` 的过滤会把结果全丢掉 —— 是 BM25 的数学，不是索引坏了
