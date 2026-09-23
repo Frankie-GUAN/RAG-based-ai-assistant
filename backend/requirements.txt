@@ -1,22 +1,30 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 sse-starlette>=2.0.0
-langchain>=0.3.0
-langchain-community>=0.3.0
-langchain-google-genai>=2.0.0
-langchain-huggingface>=0.1.0
-langchain-openai>=0.3.0
-langgraph>=0.2.0
-google-generativeai>=0.8.0
-chromadb>=0.5.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Agent / LLM
+langchain>=1.0.0
+langchain-community>=0.4.0
+langchain-huggingface>=1.0.0
+langchain-openai>=1.0.0
+langgraph>=1.0.0
+
+# MCP 工具协议
+mcp==2.2.0
+
+# 检索
+chromadb>=1.0.0
+rank-bm25>=0.2.2
+sentence-transformers>=3.0.0
 pypdf>=4.0.0
-google-search-results>=2.4.2
+
+# 存储
 sqlalchemy>=2.0.0
 pymysql>=1.1.0
 cryptography>=42.0.0
-rank-bm25>=0.2.2
-ragas>=0.2.0
-sentence-transformers>=3.0.0
+
+# 其他
 python-multipart>=0.0.12
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
+google-search-results>=2.4.2
