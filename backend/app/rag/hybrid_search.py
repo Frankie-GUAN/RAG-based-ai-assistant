@@ -8,6 +8,10 @@ from app.rag.vector_store import get_retriever
 
 
 def _vector_search(query: str, top_k: int) -> List[Tuple[Document, float]]:
+    if top_k <= 0:
+        # 0 是合法取值（「向量这一路不要候选」），所以在这里短路，而不是构造一个
+        # k=0 的 retriever —— 那只会把 0 交给 chroma 的 n_results，行为未定义。
+        return []
     retriever = get_retriever(top_k)          # ← 此前这个 k 被忽略
     docs = retriever.invoke(query)
     # 这里是名次占位分，不是相似度。RRF 只用名次，故不影响融合结果，

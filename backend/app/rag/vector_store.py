@@ -75,8 +75,14 @@ def get_retriever(k: int | None = None) -> VectorStoreRetriever:
     此前这里硬编码 settings.top_k=4，导致 hybrid_search 的 vector_top_k 参数
     被无声忽略、settings.hybrid_top_k 成为死配置 —— RRF 实际只融合了 4 路
     向量结果，而非 10+10。
+
+    用 `is None` 而不是 `or`：0 不该被当成「没传」。跳过向量这一路的调用方应把 0
+    传给 hybrid_search，由 _vector_search 短路处理 —— 本函数要求 k 为正，因为构造
+    一个 k=0 的 retriever 只会把 0 交给 chroma 的 n_results，行为未定义。
     """
     vectorstore = get_vectorstore()
     if vectorstore is None:
         raise ValueError("No persisted vector store found")
-    return vectorstore.as_retriever(search_kwargs={"k": k or settings.hybrid_top_k})
+    if k is None:
+        k = settings.hybrid_top_k
+    return vectorstore.as_retriever(search_kwargs={"k": k})

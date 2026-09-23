@@ -6,6 +6,7 @@
 """
 import logging
 import pickle
+import sys
 import threading
 
 import pytest
@@ -105,14 +106,15 @@ def _tmp_index(monkeypatch, tmp_path) -> bm25_mod.BM25Index:
     return index
 
 
-# 「半截文件」的三种真实形态：进程被 SIGKILL / OOM 打断留下的截断 pickle、
-# 磁盘上的垃圾字节、以及刚 open() 就崩掉留下的空文件。
+# 加载不了的几种真实形态：进程被 SIGKILL / OOM 打断留下的截断 pickle、磁盘上的垃圾
+# 字节、刚 open() 就崩掉留下的空文件，以及结构变更后少键的 pickle。
 _CORRUPT_PAYLOADS = {
     "truncated": pickle.dumps(
         {"documents": [Document(page_content="片段")], "index": None}
     )[:20],
     "garbage": b"\x80\x05not-a-pickle\xff\xff",
     "empty": b"",
+    "missing_key": pickle.dumps({"documents": []}),
 }
 
 
@@ -136,6 +138,57 @@ def test_bm25_load_returns_false_on_corrupt_file(
     assert index.document_count == 0
     assert index.search("片段") == []
     assert caplog.records, "损坏文件必须留一条日志，不能静默吞掉"
+
+
+class _VanishingGlobal:
+    """空类。测试里先 pickle 它的实例，再把名字从本模块删掉，用来制造「类已不存在」。"""
+
+
+def test_bm25_load_returns_false_when_a_pickled_class_is_gone(
+    monkeypatch, tmp_path, caplog
+):
+    """pickle 里嵌的是**活的** BM25Okapi 实例，所以「加载不了」不止字节损坏一种。
+
+    rank_bm25 升级、类改名或移动之后，旧 pickle 里的类引用就失效了，抛的是
+    AttributeError（不是 UnpicklingError）—— 只捕字节级异常的窄元组接不住它，
+    而 get_bm25_index() 的懒加载路径会照样抛出去。索引是可重建的缓存，
+    任何「加载不了」都该降级成 False。
+    """
+    payload = pickle.dumps({"documents": [], "index": _VanishingGlobal()})
+    # 现在把类名抹掉：反序列化时 pickle 在本模块里找不到它
+    monkeypatch.delattr(sys.modules[__name__], "_VanishingGlobal")
+
+    index = _tmp_index(monkeypatch, tmp_path)
+    index._index_path.write_bytes(payload)
+
+    with caplog.at_level(logging.ERROR, logger="app.rag.bm25_index"):
+        assert index.load() is False
+
+    assert index.document_count == 0
+    assert index.search("片段") == []
+    assert caplog.records, "加载失败必须留一条日志，不能静默吞掉"
+
+
+def test_get_retriever_does_not_treat_zero_as_unset(monkeypatch):
+    """`k or default` 会把 0 当成「没传」而回退成 hybrid_top_k —— 与 hybrid_search 里
+    同一个 bug，只是隔了一个调用点。改用 is None 之后 0 原样传下去。
+
+    （跳过向量这一路的正确入口是 hybrid_search(vector_top_k=0)，由 _vector_search
+    短路；直接给 get_retriever 传 0 属误用，但也不该被静默改成 10。）
+    """
+    captured = {}
+
+    class _FakeVectorStore:
+        def as_retriever(self, search_kwargs):
+            captured.update(search_kwargs)
+            return object()
+
+    monkeypatch.setattr(vs_mod, "get_vectorstore", lambda create=False: _FakeVectorStore())
+    monkeypatch.setattr(vs_mod.settings, "hybrid_top_k", 10, raising=False)
+
+    vs_mod.get_retriever(0)
+
+    assert captured["k"] == 0
 
 
 def test_bm25_singleton_survives_corrupt_file(monkeypatch, tmp_path):

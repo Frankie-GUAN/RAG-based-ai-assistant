@@ -64,3 +64,39 @@ def test_vector_side_requests_hybrid_top_k(monkeypatch):
     hybrid_mod.hybrid_search("劳动合同如何解除", _EmptyBM25())
 
     assert requested["k"] == 7
+
+
+def test_explicit_vector_top_k_is_passed_through(monkeypatch):
+    """显式传入的值必须原样到达 retriever，不能被配置值覆盖。"""
+    requested = {}
+
+    def _fake_get_retriever(k=None):
+        requested["k"] = k
+        return _EmptyRetriever()
+
+    monkeypatch.setattr(hybrid_mod, "get_retriever", _fake_get_retriever)
+    monkeypatch.setattr(hybrid_mod.settings, "hybrid_top_k", 10, raising=False)
+
+    hybrid_mod.hybrid_search("劳动合同如何解除", _EmptyBM25(), vector_top_k=3)
+
+    assert requested["k"] == 3
+
+
+def test_zero_vector_top_k_skips_the_vector_side(monkeypatch):
+    """0 是合法取值（「这一路不要候选」），不该被当成「没传」而回退成 hybrid_top_k。
+
+    _vector_search 直接短路，连 retriever 都不构造 —— 也就不会把 k=0 交给 chroma
+    的 n_results（那个行为未定义）。
+    """
+    called = []
+
+    def _fake_get_retriever(k=None):
+        called.append(k)
+        return _EmptyRetriever()
+
+    monkeypatch.setattr(hybrid_mod, "get_retriever", _fake_get_retriever)
+
+    result = hybrid_mod.hybrid_search("劳动合同如何解除", _EmptyBM25(), vector_top_k=0)
+
+    assert called == [], "vector_top_k=0 时不该构造 retriever"
+    assert result == []

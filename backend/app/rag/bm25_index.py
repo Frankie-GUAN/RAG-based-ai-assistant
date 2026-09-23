@@ -69,11 +69,15 @@ class BM25Index:
         os.replace(tmp_path, self._index_path)
 
     def load(self) -> bool:
-        """文件损坏时返回 False，不抛异常。
+        """索引加载不了时返回 False，不抛异常。
 
-        索引是可重建的，没什么值得为它崩掉：这个 pickle 被 SIGKILL / OOM 打断就是半截
-        文件，而 get_bm25_index() 现在跑在 lifespan 里 —— 抛出去就不是「某次检索失败」，
-        而是整个 API 起不来。
+        这里的 except 刻意宽到 Exception，而不是只捕字节级损坏（UnpicklingError /
+        EOFError / OSError）：pickle 里嵌着**活的** BM25Okapi 实例与 Document 对象，
+        所以「加载不了」的成因不止文件损坏 —— rank_bm25 升级、类改名或移动、dict
+        结构变更分别会抛 AttributeError / KeyError，那些是窄元组接不住的。
+
+        索引是可重建的缓存，宽容没有代价；而 get_bm25_index() 现在跑在 lifespan 里，
+        抛出去就不是「某次检索失败」，而是整个 API 起不来。
         """
         if not self._index_path.exists():
             return False
@@ -81,8 +85,8 @@ class BM25Index:
             with open(self._index_path, "rb") as f:
                 data = pickle.load(f)
             self._pair = (data["documents"], data["index"])
-        except (pickle.UnpicklingError, EOFError, OSError):
-            logger.exception("BM25 索引文件损坏，已忽略：%s", self._index_path)
+        except Exception:
+            logger.exception("BM25 索引加载失败，已忽略：%s", self._index_path)
             return False
         return True
 
