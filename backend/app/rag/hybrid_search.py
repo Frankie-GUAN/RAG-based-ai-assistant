@@ -10,7 +10,8 @@ from app.rag.vector_store import get_retriever
 def _vector_search(query: str, top_k: int) -> List[Tuple[Document, float]]:
     if top_k <= 0:
         # 0 是合法取值（「向量这一路不要候选」），所以在这里短路，而不是构造一个
-        # k=0 的 retriever —— 那只会把 0 交给 chroma 的 n_results，行为未定义。
+        # k=0 的 retriever —— chromadb 接受构造，但 invoke 时会抛
+        # TypeError: Number of requested results 0, cannot be negative, or zero.
         return []
     retriever = get_retriever(top_k)          # ← 此前这个 k 被忽略
     docs = retriever.invoke(query)
@@ -25,6 +26,10 @@ def _rrf_fuse(
     k: int = 60,
     top_k: int = 10,
 ) -> List[Tuple[Document, float]]:
+    if top_k <= 0:
+        # 与 _vector_search / BM25Index.search 统一：非正数即不要结果。负数尤其不能
+        # 靠切片表达 —— [:-1] 会返回「除最后一个之外的全部」，既不空也不报错。
+        return []
     scores: dict[str, float] = {}
     doc_map: dict[str, Document] = {}
 

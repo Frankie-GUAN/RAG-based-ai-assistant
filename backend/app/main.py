@@ -44,8 +44,10 @@ async def lifespan(app: FastAPI):
         try:
             await asyncio.to_thread(_preload_retrieval)
         except Exception:
-            # 预载只是延迟优化，绝不能用它换掉可用性：模型缺失、pickle 损坏都只该让
-            # 首次检索付代价。单例保持 None，懒加载路径照常工作。
+            # 预载只是延迟优化，绝不能用它换掉可用性：模型缺失、索引读不出来都只该让
+            # 首次检索付代价。embeddings / vectorstore 的单例保持 None，懒加载路径照常
+            # 工作；BM25 的单例会被建出来但标记 _load_failed，由 get_bm25_index() 重试，
+            # 且 add() 会拒绝在空白基础上覆盖落盘（见 bm25_index.BM25Index）。
             logger.exception("检索链路预载失败，将在首次请求时重试")
         else:
             logger.info("检索链路预载完成，耗时 %.2fs", time.perf_counter() - started)

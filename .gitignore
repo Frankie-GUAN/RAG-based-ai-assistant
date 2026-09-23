@@ -15,6 +15,8 @@ data/uploads/
 data/models/
 # BM25 索引产物：由 rank_bm25 构建后 pickle 落盘，属本地状态，不应入库
 data/bm25_index.pkl
+# 落盘的临时文件（写一半就崩时会留下）
+data/*.tmp
 
 # Tooling caches
 .pytest_cache/

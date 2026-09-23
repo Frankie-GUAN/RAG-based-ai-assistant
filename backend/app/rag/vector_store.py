@@ -76,9 +76,11 @@ def get_retriever(k: int | None = None) -> VectorStoreRetriever:
     被无声忽略、settings.hybrid_top_k 成为死配置 —— RRF 实际只融合了 4 路
     向量结果，而非 10+10。
 
-    用 `is None` 而不是 `or`：0 不该被当成「没传」。跳过向量这一路的调用方应把 0
-    传给 hybrid_search，由 _vector_search 短路处理 —— 本函数要求 k 为正，因为构造
-    一个 k=0 的 retriever 只会把 0 交给 chroma 的 n_results，行为未定义。
+    用 `is None` 而不是 `or`：0 不该被当成「没传」。本函数会把它**原样**交给 chroma
+    —— 实测 chromadb 1.5.9 接受构造，但在 invoke 时抛
+    `TypeError: Number of requested results 0, cannot be negative, or zero.`。
+    所以需要「跳过向量这一路」的调用方应把 0 传给 hybrid_search，由 _vector_search
+    短路处理，而不要直接调本函数。
     """
     vectorstore = get_vectorstore()
     if vectorstore is None:

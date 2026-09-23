@@ -85,8 +85,9 @@ def test_explicit_vector_top_k_is_passed_through(monkeypatch):
 def test_zero_vector_top_k_skips_the_vector_side(monkeypatch):
     """0 是合法取值（「这一路不要候选」），不该被当成「没传」而回退成 hybrid_top_k。
 
-    _vector_search 直接短路，连 retriever 都不构造 —— 也就不会把 k=0 交给 chroma
-    的 n_results（那个行为未定义）。
+    _vector_search 直接短路，连 retriever 都不构造 —— 也就不会把 k=0 交给 chroma，
+    后者接受构造但会在 invoke 时抛
+    TypeError: Number of requested results 0, cannot be negative, or zero.
     """
     called = []
 
@@ -100,3 +101,14 @@ def test_zero_vector_top_k_skips_the_vector_side(monkeypatch):
 
     assert called == [], "vector_top_k=0 时不该构造 retriever"
     assert result == []
+
+
+def test_non_positive_final_top_k_yields_nothing():
+    """final_top_k 直接来自 LLM 的工具参数，所以非正数必须是「不要结果」而不是
+    「除最后一个之外的全部」—— python 的 [:-1] 正是后者。"""
+    docs = [Document(page_content=f"doc{i}") for i in range(5)]
+    ranked = [(doc, 1.0) for doc in docs]
+
+    assert hybrid_mod._rrf_fuse(ranked, [], top_k=5) != []
+    assert hybrid_mod._rrf_fuse(ranked, [], top_k=0) == []
+    assert hybrid_mod._rrf_fuse(ranked, [], top_k=-1) == []

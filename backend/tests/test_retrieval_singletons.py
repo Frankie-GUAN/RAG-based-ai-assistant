@@ -159,14 +159,104 @@ def test_bm25_load_returns_false_when_a_pickled_class_is_gone(
     monkeypatch.delattr(sys.modules[__name__], "_VanishingGlobal")
 
     index = _tmp_index(monkeypatch, tmp_path)
+    # 先放入一对已知状态：用来证明加载失败时旧的一对**原样保留**，而不是被赋成半成品。
+    # 只断言「document_count == 0」区分不了「没动过」与「documents 赋了、index 没赋」。
+    # 这里不断言 search() 的结果：单篇语料下查询词的 idf 为负，会整条被 score > 0 滤掉，
+    # 那是 BM25 的数学（见下方 test_negative_top_k 的注释），与本用例要证明的事无关。
+    index.build([Document(page_content="既有片段")])
     index._index_path.write_bytes(payload)
 
     with caplog.at_level(logging.ERROR, logger="app.rag.bm25_index"):
         assert index.load() is False
 
-    assert index.document_count == 0
-    assert index.search("片段") == []
+    assert index.document_count == 1
+    assert index._pair[1] is not None
     assert caplog.records, "加载失败必须留一条日志，不能静默吞掉"
+
+
+def test_bm25_add_refuses_to_overwrite_an_unreadable_index(monkeypatch, tmp_path):
+    """数据丢失护栏：索引文件读不出来时，它是**唯一**副本。
+
+    旧行为下 get_bm25_index() 会把空索引固化，之后任意一次上传都会走 add() → save()，
+    用「只有新 chunk」的索引覆盖上去 —— 2196 篇会变成新上传的这几篇，而仓库里没有从
+    Chroma 重建 BM25 的路径，不可恢复。宁可让这次上传响亮地失败。
+    """
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    index_path = tmp_path / "bm25_index.pkl"
+    unreadable = b"\x80\x05not-a-pickle"
+    index_path.write_bytes(unreadable)
+
+    index = bm25_mod.BM25Index()
+    assert index.load() is False
+    assert index._load_failed is True
+
+    with pytest.raises(RuntimeError, match="拒绝以空白基础覆盖落盘"):
+        index.add([Document(page_content="新片段")])
+
+    assert index_path.read_bytes() == unreadable, "磁盘上那份必须原封不动"
+
+
+def test_bm25_save_does_not_refuse_when_there_is_no_index_yet(monkeypatch, tmp_path):
+    """反向护栏：全新库（没有索引文件）不是「加载失败」，首次上传必须能落盘。"""
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    index = bm25_mod.BM25Index()
+    assert index.load() is False
+    assert index._load_failed is False
+
+    index.add([Document(page_content="劳动合同法第三十六条")])
+
+    assert index.document_count == 1
+    assert (tmp_path / "bm25_index.pkl").exists()
+
+
+def test_get_bm25_index_retries_after_a_failed_load(monkeypatch, tmp_path):
+    """一次瞬时故障不该让 BM25 整条路径在整个进程生命周期内都退化成空。"""
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    monkeypatch.setattr(bm25_mod, "_bm25", None, raising=False)
+    monkeypatch.setattr(bm25_mod, "_RETRY_INTERVAL_SECONDS", 0.0, raising=False)
+
+    (tmp_path / "bm25_index.pkl").write_bytes(b"\x80\x05broken")
+
+    first = bm25_mod.get_bm25_index()
+    assert first._load_failed is True
+    assert first.document_count == 0
+
+    # 故障排除：写一份真实可读的索引
+    healthy = bm25_mod.BM25Index()
+    healthy.build([Document(page_content="劳动合同法第三十六条")])
+    healthy.save()
+
+    retried = bm25_mod.get_bm25_index()
+
+    assert retried is first, "重试应作用于同一个单例，而不是另建一个"
+    assert retried._load_failed is False
+    assert retried.document_count == 1
+
+
+def test_negative_top_k_returns_nothing(monkeypatch, tmp_path):
+    """负数不能靠切片表达：sorted(...)[:-1] 会返回「除最后一个之外的全部」，
+    既不空也不报错。三处路径必须一致地当成「不要结果」。
+
+    语料刻意让查询词只出现在少数文档里：BM25Okapi 的 idf 是
+    log((N-df+0.5)/(df+0.5))，只有 df < N/2 才为正；df == N 时（或 N=1 的单篇语料）
+    idf 为负，会被 epsilon 地板压成非正，于是 search() 里 `score > 0` 的过滤把结果
+    全丢掉 —— 那是 BM25 的数学，不是索引坏了，写小语料 fixture 时很容易撞上。
+    """
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    index = bm25_mod.BM25Index()
+    index.build(
+        [
+            Document(page_content="劳动合同法第三十六条规定协商一致可以解除劳动合同"),
+            Document(page_content="劳动者提前三十日书面通知用人单位可以解除劳动合同"),
+            Document(page_content="Python是一种广泛使用的高级编程语言"),
+            Document(page_content="FastAPI是现代Python Web框架支持异步处理"),
+            Document(page_content="机器学习模型的评估指标包括准确率与召回率"),
+        ]
+    )
+
+    assert index.search("劳动合同", top_k=5) != []
+    assert index.search("劳动合同", top_k=0) == []
+    assert index.search("劳动合同", top_k=-1) == []
 
 
 def test_get_retriever_does_not_treat_zero_as_unset(monkeypatch):
