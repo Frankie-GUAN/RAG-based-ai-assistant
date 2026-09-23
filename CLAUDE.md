@@ -99,5 +99,5 @@ GSAP 动画统一使用同一套写法：模块作用域的 `let ctx`，`onMount
 
 - 后端是同步 SQLAlchemy 2.0（`select()` 风格），用 `get_db()` 作为依赖；ORM 模型在 `main.py` 里被导入以产生副作用，好让 `create_all` 能看到它们。
 - 后端的注释/文档字符串与所有文档都是中文；前端代码注释是英文，但所有 UI 文案是中文。
-- 较新文件里的领域 fixture 与 prompt 都是中文直播/电商场景，而早期测试仍用劳动法/PDF 的示例数据。
+- 测试 fixture 用中文劳动法/PDF 文档问答作为示例数据（`tests/conftest.py` 的 `sample_documents`）。
 - Vue 组件是单词 PascalCase，放在 `components/{chat,knowledge,evaluation,layout}/` 下；页面是 `views/` 下的 `*View.vue`。

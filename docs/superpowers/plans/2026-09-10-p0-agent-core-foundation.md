@@ -4,7 +4,7 @@
 
 **Goal:** 把「带路由的 RAG pipeline」改造成真正的 ReAct Agent，并兑现 README 里关于 MCP 协议与 token 流式的两处虚假宣称。
 
-**第二版修订（2026-09-23）：** 在动手前对该仓库做了一次缺陷排查，发现 4 个计划外但会削弱 P0 成果的问题（检索链路零缓存、评测阻塞事件循环、历史摘要永久丢上下文、消息时序不确定）。它们已作为 Task 2 / 3 / 9 / 10 并入本计划，原 Task 2–6 顺延为 Task 4–8。详见「与 spec 的偏离」。
+**第二版修订（2026-09-23）：** 在动手前对该仓库做了一次缺陷排查，发现 4 个计划外但会削弱 P0 成果的问题（检索链路零缓存、评测阻塞事件循环、历史摘要永久丢上下文、消息时序不确定）。它们已作为 Task 2 / 3 / 9 / 10 并入本计划，原 Task 2–6 顺延为 Task 4–8。详见「与原始六任务版本的偏离」。
 
 **Architecture:** 先定义 `AgentEvent` 事件协议（Python 端），再依次落地上下文工程引擎、真 MCP 工具层、ReAct 核心循环、真流式 SSE。工具通过 `MCPServer` 在同进程内暴露（`InMemoryTransport`），Agent 作为 MCP Client 调用；LLM 调用用 `astream` 累积 `AIMessageChunk`，同时获得 token 级流式与 tool calling。
 
@@ -88,7 +88,7 @@
 |---|---|
 | `backend/requirements.txt` | 删死依赖、加 `mcp` |
 | `backend/tests/conftest.py` | 加 `anyio_backend` fixture |
-| `backend/app/tools/document_search.py` | 返回结构化 list，移除 registry 注册 |
+| `backend/app/tools/document_search.py` | 读路径改用 `get_bm25_index()`（Task 2）；返回结构化 list、移除 registry 注册（Task 6） |
 | `backend/app/tools/web_search.py` | 同上 |
 | `backend/app/tools/document_parser.py` | 同上 |
 | `backend/app/config.py` | 加上下文预算配置 |
@@ -98,7 +98,7 @@
 | `backend/app/rag/vector_store.py` | embeddings 与 Chroma 句柄单例化（Task 2） |
 | `backend/app/rag/bm25_index.py` | 单例化 + 原子替换 `(documents, index)`（Task 2） |
 | `backend/app/rag/reranker.py` | 单例化，但**本轮不接入查询链路**（Task 2） |
-| `backend/app/services/knowledge_service.py` | 改用共用的 `add_to_index`（Task 2） |
+| `backend/app/services/knowledge_service.py` | 改用 `get_bm25_index().add()`（Task 2） |
 | `backend/app/config.py` | 追加 `preload_models`（Task 2）与摘要相关配置（Task 9） |
 | `backend/app/models/conversation.py` | 加 `summary_upto_message_id`（Task 9） |
 | `backend/app/services/conversation_service.py` | 滚动增量摘要，失败不缓存（Task 9） |
@@ -149,9 +149,9 @@ Expected: 命中 `app/tools/registry.py`、`app/tools/schemas.py`、`app/tools/d
 记下这两个「任务外但会受牵连」的文件：
 
 - `app/api/tools.py` —— 对外暴露工具列表接口，Task 6 Step 12 改它。
-- `app/agent/nodes.py` —— `retrieve_node` / `web_search_node` 直接调 `tool_registry.execute(...)`。它会在 Task 7 Step 8 被删除，所以本任务不动它；但这也说明**在 Task 6 删掉 registry 之后、Task 7 删掉 nodes.py 之前，应用处于无法导入的中间态**。这是计划内的已知状态，Task 7 Step 9 已标注。
+- `app/agent/nodes.py` —— `retrieve_node` / `web_search_node` 直接调 `tool_registry.execute(...)`。它会在 Task 7 Step 8 被删除，所以本任务不动它；但这也说明**在 Task 6 删掉 registry 之后、Task 7 删掉 nodes.py 之前，应用处于无法导入的中间态**。这是计划内的已知状态，Task 7 Step 11 已标注。
 
-补充（2026-09-23）：`app/services/evaluation_service.py` 同样 import 了 `agent_graph` 与 `AgentState`，原计划漏了它。Task 7 Step 8 已补上对应的处理步骤。
+补充（2026-09-23）：`app/services/evaluation_service.py` 同样 import 了 `agent_graph` 与 `AgentState`，原计划漏了它。Task 7 Step 9 / Step 10 已补上对应的处理步骤。
 
 - [ ] **Step 3: 重写 `backend/requirements.txt`**
 
@@ -255,6 +255,7 @@ pytest was never installed, so the 4 existing test files could not run."
 - Modify: `backend/app/rag/reranker.py`
 - Modify: `backend/app/services/knowledge_service.py`
 - Modify: `backend/app/tools/document_parser.py`
+- Modify: `backend/app/tools/document_search.py`
 - Modify: `backend/app/config.py`
 - Modify: `backend/app/main.py`
 - Modify: `README.md`
@@ -644,7 +645,18 @@ def get_reranker() -> "Reranker":
 
 并同步调整 import：删掉未使用的 `load_vectorstore`，把 `BM25Index` 换成 `get_bm25_index`。
 
-`backend/app/tools/document_parser.py` 做同样替换（该文件在 Task 6 会被整体改写为返回结构化 dict，此处只需让它在过渡期仍可用）。
+`backend/app/tools/document_parser.py`（写路径）与 `backend/app/tools/document_search.py`（**读路径，也就是每次检索都走的热路径**）做同样的替换：
+
+```python
+# document_search.py
+def search_documents(query: str, top_k: int = 4) -> str:
+    results = hybrid_search(query, get_bm25_index(), final_top_k=top_k)
+    ...
+```
+
+**这两个文件在 Task 6 会被整体改写，改写时必须沿用 `get_bm25_index()`** —— 否则 Task 2 对 BM25 的修复会被 Task 6 悄悄改回去，读路径重新变成「每次检索都重建索引 + 重读 pickle」。Task 6 Step 1 / Step 3 的代码已按此写好。
+
+顺带把 `backend/app/services/knowledge_service.py` 与 `backend/app/tools/document_parser.py` 里重复的「load → extend → build → save」逻辑删掉 —— 这正是 CLAUDE.md 里记的「两条建索引路径可能分叉」的根源，现在只剩 `add()` 一处。
 
 - [ ] **Step 8: 在 `backend/app/main.py` 的 lifespan 中预热**
 
@@ -940,37 +952,21 @@ def anyio_backend():
 ```python
 import json
 
-import pytest
-
 from app.agent.protocol import (
-    Citation,
-    CitationEvent,
     ErrorEvent,
     FinalEvent,
-    HandoffEvent,
-    PlanEvent,
-    PlanStep,
-    ReflectEvent,
-    ThoughtEvent,
     TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
-    Usage,
     to_sse,
 )
 
-# 与 TS 端 frontend/src/agent/protocol.ts 共享的契约。
+# 与前端事件分发（frontend/src/composables/useChat.ts）共享的契约。
 # 任何一边增删事件类型，此集合必须同步更新。
 EXPECTED_EVENT_TYPES = {
-    "plan",
-    "thought",
     "tool_call",
     "tool_result",
     "token",
-    "citation",
-    "memory_write",
-    "handoff",
-    "reflect",
     "final",
     "error",
 }
@@ -980,22 +976,11 @@ def test_token_event_serializes_with_type_key():
     assert TokenEvent(text="你好").to_dict() == {"type": "token", "text": "你好"}
 
 
-def test_handoff_wire_key_is_from_not_from_underscore():
-    """协议里字段名是 from，但 from 是 Python 关键字，实现用 from_。"""
-    payload = HandoffEvent(from_="edge", to="cloud", reason="complex-plan", latency_budget_ms=200).to_dict()
-
-    assert payload["from"] == "edge"
-    assert payload["to"] == "cloud"
-    assert payload["latency_budget_ms"] == 200
-    assert "from_" not in payload
-
-
-def test_tool_call_carries_exec_location():
-    payload = ToolCallEvent(id="call_1", name="search_documents", args={"query": "规则"}).to_dict()
+def test_tool_call_carries_args():
+    payload = ToolCallEvent(id="call_1", name="search_documents", args={"query": "合同解除"}).to_dict()
 
     assert payload["type"] == "tool_call"
-    assert payload["exec"] == "cloud"
-    assert payload["args"] == {"query": "规则"}
+    assert payload["args"] == {"query": "合同解除"}
 
 
 def test_tool_result_records_failure_without_raising():
@@ -1006,35 +991,26 @@ def test_tool_result_records_failure_without_raising():
     assert payload["ms"] == 1200
 
 
-def test_final_event_nests_citations_and_usage():
-    payload = FinalEvent(
-        answer="转化率最低的是 8 月 3 日那场",
-        citations=(Citation(doc_id="rules#0", chunk="...", score=0.91, source="rules.pdf"),),
-        usage=Usage(prompt_tokens=100, completion_tokens=20, total_tokens=120),
-    ).to_dict()
+def test_final_event_carries_the_full_answer():
+    payload = FinalEvent(answer="劳动合同经双方协商一致可以解除").to_dict()
 
-    assert payload["answer"].startswith("转化率")
-    assert payload["citations"][0]["doc_id"] == "rules#0"
-    assert payload["usage"]["total_tokens"] == 120
+    assert payload["answer"] == "劳动合同经双方协商一致可以解除"
 
 
-def test_plan_event_nests_steps():
-    payload = PlanEvent(steps=(PlanStep(id="s1", goal="查场次数据", depends_on=()),)).to_dict()
+def test_error_event_is_machine_readable():
+    payload = ErrorEvent(code="max_iterations", message="达到迭代上限", recoverable=True).to_dict()
 
-    assert payload["steps"][0]["goal"] == "查场次数据"
+    assert payload["type"] == "error"
+    assert payload["code"] == "max_iterations"
+    assert payload["recoverable"] is True
 
 
 def test_every_declared_event_type_is_covered():
-    """防止新增事件类型后忘记同步 TS 端契约。"""
+    """防止新增事件类型后忘记同步前端契约。"""
     declared = {
-        PlanEvent.type,
-        ThoughtEvent.type,
         ToolCallEvent.type,
         ToolResultEvent.type,
         TokenEvent.type,
-        CitationEvent.type,
-        HandoffEvent.type,
-        ReflectEvent.type,
         FinalEvent.type,
         ErrorEvent.type,
     }
@@ -1043,11 +1019,11 @@ def test_every_declared_event_type_is_covered():
 
 
 def test_to_sse_keeps_chinese_readable():
-    frame = to_sse(TokenEvent(text="直播"))
+    frame = to_sse(TokenEvent(text="检索"))
 
     assert frame["event"] == "token"
-    assert "直播" in frame["data"]  # ensure_ascii=False
-    assert json.loads(frame["data"]) == {"type": "token", "text": "直播"}
+    assert "检索" in frame["data"]  # ensure_ascii=False
+    assert json.loads(frame["data"]) == {"type": "token", "text": "检索"}
 
 
 def test_to_sse_data_is_single_line():
@@ -1071,47 +1047,20 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'app.agent.protocol'`
 ```python
 """Agent 事件协议（Python 端）。
 
-契约与 TS 端 frontend/src/agent/protocol.ts 一致。
-设计依据见 docs/superpowers/specs/2026-09-10-live-agent-platform-design.md §4.1。
+只定义 P0 真正会发出的事件 —— 不留「定义了但无生产者」的类型，
+那正是本计划要消灭的那类问题。所有事件继承 AgentEvent，
+to_dict() 序列化为 {"type": <事件名>, ...payload}。
 
-所有事件继承 AgentEvent，to_dict() 序列化为 {"type": <事件名>, ...payload}。
 新增事件类型时，必须同步：
   1. 本文件
-  2. frontend/src/agent/protocol.ts
-  3. tests/test_protocol.py 的 EXPECTED_EVENT_TYPES
+  2. tests/test_protocol.py 的 EXPECTED_EVENT_TYPES
+  3. frontend/src/composables/useChat.ts 的事件分发
 """
 from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, ClassVar, Literal
-
-MemoryScope = Literal["session", "long_term"]
-ExecLocation = Literal["edge", "cloud"]
-ReflectVerdict = Literal["pass", "retry"]
-
-
-@dataclass(frozen=True)
-class PlanStep:
-    id: str
-    goal: str
-    tool_hint: str | None = None
-    depends_on: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class Citation:
-    doc_id: str
-    chunk: str
-    score: float
-    source: str
-
-
-@dataclass(frozen=True)
-class Usage:
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
+from typing import Any, ClassVar
 
 
 @dataclass(frozen=True)
@@ -1127,25 +1076,11 @@ class AgentEvent:
 
 
 @dataclass(frozen=True)
-class PlanEvent(AgentEvent):
-    type: ClassVar[str] = "plan"
-    steps: tuple[PlanStep, ...] = ()
-
-
-@dataclass(frozen=True)
-class ThoughtEvent(AgentEvent):
-    type: ClassVar[str] = "thought"
-    text: str = ""
-    step_id: str = ""
-
-
-@dataclass(frozen=True)
 class ToolCallEvent(AgentEvent):
     type: ClassVar[str] = "tool_call"
     id: str = ""
     name: str = ""
     args: dict[str, Any] = field(default_factory=dict)
-    exec: ExecLocation = "cloud"
 
 
 @dataclass(frozen=True)
@@ -1165,48 +1100,9 @@ class TokenEvent(AgentEvent):
 
 
 @dataclass(frozen=True)
-class CitationEvent(AgentEvent):
-    type: ClassVar[str] = "citation"
-    doc_id: str = ""
-    chunk: str = ""
-    score: float = 0.0
-    source: str = ""
-
-
-@dataclass(frozen=True)
-class MemoryWriteEvent(AgentEvent):
-    type: ClassVar[str] = "memory_write"
-    scope: MemoryScope = "session"
-    content: str = ""
-
-
-@dataclass(frozen=True)
-class HandoffEvent(AgentEvent):
-    type: ClassVar[str] = "handoff"
-    from_: str = "edge"          # from 是 Python 关键字，线上字段名仍是 from
-    to: str = "cloud"
-    reason: str = ""
-    latency_budget_ms: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        payload = super().to_dict()
-        payload["from"] = payload.pop("from_")
-        return payload
-
-
-@dataclass(frozen=True)
-class ReflectEvent(AgentEvent):
-    type: ClassVar[str] = "reflect"
-    verdict: ReflectVerdict = "pass"
-    critique: str = ""
-
-
-@dataclass(frozen=True)
 class FinalEvent(AgentEvent):
     type: ClassVar[str] = "final"
     answer: str = ""
-    citations: tuple[Citation, ...] = ()
-    usage: Usage = field(default_factory=Usage)
 
 
 @dataclass(frozen=True)
@@ -1229,13 +1125,18 @@ cd backend
 ../.venv/Scripts/python.exe -m pytest tests/test_protocol.py -v
 ```
 
-Expected: 9 passed
+Expected: 8 passed
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add backend/app/agent/protocol.py backend/tests/test_protocol.py backend/tests/conftest.py
-git commit -m "feat: add AgentEvent protocol shared with the future TS edge runtime"
+git commit -m "feat: add the AgentEvent protocol shared with the frontend
+
+Defines only the five events P0 actually emits — tool_call, tool_result,
+token, final, error. Types with no producer are deliberately absent,
+since 'declared but never sent' is the same class of problem as the
+README claims this work exists to remove."
 ```
 
 ---
@@ -1254,7 +1155,7 @@ git commit -m "feat: add AgentEvent protocol shared with the future TS edge runt
 插入到 `reranker_model` 之后、`history_window_size` 之前：
 
 ```python
-    # Context engineering (§4.7)
+    # 上下文工程：分层 token 预算
     context_total_tokens: int = 32_000
     context_system_ratio: float = 0.15
     context_memory_ratio: float = 0.10
@@ -1309,10 +1210,10 @@ def test_build_puts_system_message_first(engine):
 
 
 def test_build_ends_with_the_user_question(engine):
-    result = engine.build(system="sys", question="上周哪场转化率最低？")
+    result = engine.build(system="sys", question="劳动合同如何解除？")
 
     assert isinstance(result.messages[-1], HumanMessage)
-    assert "上周哪场转化率最低？" in result.messages[-1].content
+    assert "劳动合同如何解除？" in result.messages[-1].content
 
 
 def test_history_is_mapped_to_message_roles(engine):
@@ -1427,8 +1328,8 @@ class HeuristicTokenCounter:
 ```python
 """上下文工程引擎：分层 token 预算 + 消息拼装。
 
-设计见 docs/superpowers/specs/2026-09-10-live-agent-platform-design.md §4.7。
 每层独立预算，层内超限先截断，**不跨层抢占**。
+各层比例由 config.py 的 context_* 配置项控制。
 """
 from __future__ import annotations
 
@@ -1657,17 +1558,15 @@ git commit -m "feat: add layered context engineering engine with per-layer token
 返回结构化数据（不再拼字符串、不再注册 registry），供 Agent 与引用溯源使用：
 
 ```python
-from app.rag.bm25_index import BM25Index
+from app.rag.bm25_index import get_bm25_index
 from app.rag.hybrid_search import hybrid_search
 
 
 def search_documents(query: str, top_k: int = 4) -> list[dict]:
     """混合检索私有文档库，返回结构化片段列表（相关度降序）。"""
-    bm25 = BM25Index()
-    if bm25.document_count == 0:
-        bm25.load()
-
-    results = hybrid_search(query, bm25, final_top_k=top_k)
+    # 必须用共享单例：此处若写 BM25Index()，每次检索都会重建索引并重读 pickle，
+    # 把 Task 2 对 BM25 的修复整体作废。
+    results = hybrid_search(query, get_bm25_index(), final_top_k=top_k)
 
     return [
         {
@@ -1715,7 +1614,7 @@ def search_web(query: str, num: int = 5) -> list[dict]:
 ```python
 from pathlib import Path
 
-from app.rag.bm25_index import BM25Index
+from app.rag.bm25_index import get_bm25_index
 from app.rag.loader import load_file, split_documents
 from app.rag.vector_store import add_documents
 
@@ -1728,13 +1627,7 @@ def parse_document(file_path: str) -> dict:
 
     chunks = split_documents(load_file(path))
     add_documents(chunks)
-
-    bm25 = BM25Index()
-    bm25.load()
-    all_docs = list(bm25._documents) if bm25._documents else []
-    all_docs.extend(chunks)
-    bm25.build(all_docs)
-    bm25.save()
+    get_bm25_index().add(chunks)          # Task 2 引入，取代原先的 load/extend/build/save
 
     return {"file": path.name, "chunks": len(chunks)}
 ```
@@ -1753,6 +1646,8 @@ from app.tools import web_search  # noqa: F401
 cd backend
 git rm app/tools/registry.py app/tools/schemas.py
 ```
+
+**已知中间态：从本步到 Step 12 之间，应用无法导入。** `app/api/tools.py` 仍 import 被删掉的 `tool_registry`（Step 12 才改），`app/agent/nodes.py` 同样（Task 7 Step 8 才删）。这与 Task 1 Step 2 里记的是同一件事，Step 13 会验证最终可导入。若想每一步都保持可导入，可把 Step 12 提前到本步之前。
 
 - [ ] **Step 6: 写失败的测试 `backend/tests/test_mcp_tools.py`**
 
@@ -1821,7 +1716,7 @@ async def test_openai_schema_shape_matches_langchain_expectation():
 async def test_successful_call_unwraps_structured_content():
     """mcp 把结构化返回值包在 {"result": ...} 里，客户端必须拆包。"""
     async with open_tool_client(make_stub_server()) as client:
-        result = await client.call("search_documents", {"query": "直播规则"})
+        result = await client.call("search_documents", {"query": "合同解除"})
 
     assert result.ok is True
     assert result.data["data"][0]["doc_id"] == "d1"
@@ -1889,7 +1784,7 @@ from app.tools.web_search import search_web as _search_web
 mcp_server = MCPServer(
     name="rag-agent-tools",
     version="0.1.0",
-    description="直播主播经营助手的工具集：私有知识库检索、联网搜索、文档解析。",
+    description="智能问答平台的工具集：私有知识库检索、联网搜索、文档解析。",
 )
 
 
@@ -2298,14 +2193,14 @@ async def test_agent_answers_directly_without_tools():
 @pytest.mark.anyio
 async def test_agent_executes_tool_then_streams_the_answer():
     model = ScriptedChatModel([
-        tool_turn("search_documents", {"query": "直播规则"}),
+        tool_turn("search_documents", {"query": "合同解除"}),
         text_turn("根据", "资料", "答案是……"),
     ])
 
     async with open_tool_client(make_stub_server()) as tools:
         events = [
             e async for e in run_agent_stream(
-                AgentTask(question="直播有哪些红线？"),
+                AgentTask(question="劳动合同解除需要什么条件？"),
                 AgentDeps(model=model, tools=tools, context=make_engine()),
             )
         ]
@@ -2315,14 +2210,14 @@ async def test_agent_executes_tool_then_streams_the_answer():
     ]
     call = events[0]
     assert call.name == "search_documents"
-    assert call.args == {"query": "直播规则"}
+    assert call.args == {"query": "合同解除"}
     assert events[1].ok is True
 
 
 @pytest.mark.anyio
 async def test_tool_result_is_fed_back_to_the_model():
     model = ScriptedChatModel([
-        tool_turn("search_documents", {"query": "直播规则"}),
+        tool_turn("search_documents", {"query": "合同解除"}),
         text_turn("完成"),
     ])
 
@@ -2338,7 +2233,7 @@ async def test_tool_result_is_fed_back_to_the_model():
     tool_messages = [m for m in second_call_messages if type(m).__name__ == "ToolMessage"]
 
     assert len(tool_messages) == 1
-    assert "直播规则 的结果" in tool_messages[0].content
+    assert "合同解除 的结果" in tool_messages[0].content
     assert tool_messages[0].tool_call_id == "call_1"
 
 
@@ -2471,10 +2366,10 @@ from app.context.engine import ContextEngine
 from app.mcp.client import MCPToolClient
 
 SYSTEM_PROMPT = (
-    "你是直播主播经营助手，服务主播及其运营人员。"
-    "你可以调用工具检索平台规则与商品知识库、查询直播数据、联网搜索最新信息。\n"
+    "你是智能问答助手，基于私有文档知识库与联网搜索回答用户问题。"
+    "你可以调用工具检索私有文档、联网搜索、解析上传的文档。\n"
     "规则：\n"
-    "1. 需要事实依据时先调用工具，不要凭记忆回答平台规则或数据。\n"
+    "1. 需要事实依据时先调用工具，不要凭记忆回答文档中的内容或数据。\n"
     "2. 调用工具时不要输出解释性文字。\n"
     "3. 资料不足时明确说明不确定，不要编造。\n"
     "4. 引用检索结果时说明来源。"
@@ -2685,7 +2580,7 @@ from app.mcp.client import MCPToolClient
 from app.services.chat_service import build_context_engine
 
 # 查询之间的人工间隔，用于规避限流。
-# spec §4.9 的「并发 + 信号量限流（并发度 4）」属评测 v2（P2），本轮保持串行。
+# 并发执行 + 信号量限流属于评测体系的后续优化，本轮保持串行。
 _QUERY_INTERVAL_SECONDS = 3
 
 
@@ -2695,10 +2590,9 @@ async def _run_query(
     """跑一次问答，返回 (答案, 检索到的上下文)。
 
     **上下文口径（重要）：** 忠实度判官本应吃「真正进入 prompt 的检索片段」。
-    P0 的 Agent Core 尚不发出 citation 事件（CitationEvent 已在协议中定义，
-    按 spec §4.9 引用溯源属 P1），因此这里用工具返回的 data 近似。
-    将来改动 Core 的引用机制时，必须同步复核此处的口径，否则 faithfulness
-    分数的含义会悄悄漂移。
+    P0 的 Agent Core 只发出 5 种事件，其中不含引用溯源，因此这里用工具返回的
+    data 近似。将来给 Core 加上引用溯源时，必须同步复核此处的口径，
+    否则 faithfulness 分数的含义会悄悄漂移。
     """
     answer = ""
     retrieved: list[str] = []
@@ -2875,8 +2769,6 @@ API key or network."
 ```python
 import json
 
-import pytest
-
 from app.agent.protocol import (
     ErrorEvent,
     FinalEvent,
@@ -2888,7 +2780,7 @@ from app.agent.protocol import (
 
 
 def test_token_event_maps_to_sse_frame():
-    frame = to_sse(TokenEvent(text="直播"))
+    frame = to_sse(TokenEvent(text="检索"))
 
     assert frame["event"] == "token"
     assert json.loads(frame["data"])["type"] == "token"
@@ -2896,12 +2788,12 @@ def test_token_event_maps_to_sse_frame():
 
 def test_frames_can_be_reassembled_into_the_full_answer():
     """前端按顺序拼接 token 事件必须还原出完整答案。"""
-    pieces = ["根据", "平台", "规则", "……"]
+    pieces = ["根据", "文档", "内容", "……"]
     reconstructed = "".join(
         json.loads(to_sse(TokenEvent(text=p))["data"])["text"] for p in pieces
     )
 
-    assert reconstructed == "根据平台规则……"
+    assert reconstructed == "根据文档内容……"
 
 
 def test_tool_events_carry_enough_for_a_trace_view():
@@ -3038,7 +2930,7 @@ async def chat_stream(request: ChatRequest, app_request: Request):
 
 此步原为「在 lifespan 中挂载 MCP 工具客户端」，已前移到 Task 7 Step 10 —— 因为 Task 7 的评测链路是第一个需要 `app.state.mcp_client` 的消费者，若留在这里，Task 7 结束时应用处于不可用状态。
 
-此处只需确认 `main.py` 的 lifespan 里已有 `async with open_tool_client(mcp_server) as tool_client: app.state.mcp_client = tool_client`。同时顺手把 `FastAPI(title=...)` 从 `"Agentic RAG API"` / `version="0.1.0"` 改为与 spec 一致的名字与 `0.2.0`。
+此处只需确认 `main.py` 的 lifespan 里已有 `async with open_tool_client(mcp_server) as tool_client: app.state.mcp_client = tool_client`。同时顺手把 `FastAPI` 的 `version` 从 `"0.1.0"` 改为 `"0.2.0"`（功能已显著变化，版本号值得跟进）；`title` 保持 `"Agentic RAG API"` 不变，它与本仓库一致。
 
 - [ ] **Step 5: 验证应用可导入**
 
@@ -3614,7 +3506,7 @@ Expected: 1 passed
 # 终端 A：发起一次评测（会串行跑，含 3s 间隔）
 curl -X POST http://localhost:8000/api/evaluation/run \
   -H "Content-Type: application/json" \
-  -d '{"queries":["直播有哪些红线","转化率怎么算"]}'
+  -d '{"queries":["劳动合同如何解除","试用期最长多久"]}'
 
 # 终端 B：评测进行中，反复打 health 并计时
 time curl -s http://localhost:8000/api/health
@@ -3676,19 +3568,20 @@ Expected: `干净`
 
 ## Self-Review 记录
 
-**Spec 覆盖检查：** 本计划覆盖 spec §6 P0 的全部 6 项任务（依赖清理、Agent 协议、上下文引擎、MCP 工具层、Agent Core、真流式），外加 4 项缺陷修复。
-spec §4.9 的评测体系 v2 属 P1/P2，不在本计划范围。
+**覆盖检查：** 本计划覆盖 P0 的全部 6 项技术任务（依赖清理、Agent 协议、上下文引擎、MCP 工具层、Agent Core、真流式），外加 4 项缺陷修复。
 
-**与 spec 的六处偏离：**
+**任务集相对最初六任务版本的六处调整：**
 
-1. **Agent 协议从 P2 提前到 P0（原任务 2 → 现任务 4）**。原计划排在 P2 任务 11，但 P0 的 MCP、Agent Core、流式三者都要发事件，协议必须先有。P2 任务 11 现改为「实现协议的 TS 端」。
-2. **上下文引擎从任务 6 提前到任务 3（现任务 5）**。原顺序下 Agent Core 要调用尚不存在的上下文引擎，构成循环依赖。
+1. **Agent 协议提前到 P0（现 Task 4）**。最初排在后续阶段，但 MCP、Agent Core、流式三者都要发事件，协议必须先有。
+2. **上下文引擎从第 6 位提前到第 3 位（现 Task 5）**。原顺序下 Agent Core 要调用尚不存在的上下文引擎，构成循环依赖。
 3. **新增 Task 2「检索链路单例化」**。Task 7 的 Agent Core 会用 `asyncio.gather` 并发调用工具，而 `get_embeddings()` 每次调用都重建 BGE-M3（实测 9.82s 冷 / 2.29s 温）。不改则并发下会同时加载 N 份约 2GB 的模型 —— 这是 Task 6/7 的前置条件，不是可选优化。
 4. **新增 Task 3「消息时序确定性」**。`messages.created_at` 秒精度 + `save_message` 不 flush，导致同一次问答的两条消息时间戳完全相同（实测 id 35/36 均为 `2026-06-03 17:58:52`），而关系正按 `created_at` 排序。它同时影响喂给摘要的 transcript 顺序，因此也是 Task 9 的前置。
 5. **新增 Task 9「滚动增量摘要」**。原实现只在 `summary` 为空时摘要一次，之后窗口外的中间消息静默丢失。修复需要记录摘要的覆盖边界，因而新增 `summary_upto_message_id` 字段，并附带一个幂等列检查（`app/db/migrate.py`）—— 因为 `create_all` 不会给已有表加列。
-6. **新增 Task 10「评测链路收尾与回归」**。原计划的「修改」清单遗漏了 `app/services/evaluation_service.py`（它 import 了将被删除的 `agent_graph`），且该模块是 `async` 端点里直接调用的同步函数、内含 `time.sleep(3)`，3 条 query 即冻结整个服务器 30~60s。相应地，原 Task 6 中「在 lifespan 挂载 MCP 客户端」一步前移到了 Task 7。
+6. **新增 Task 10「评测链路收尾与回归」**。最初的「修改」清单遗漏了 `app/services/evaluation_service.py`（它 import 了将被删除的 `agent_graph`），且该模块是 `async` 端点里直接调用的同步函数、内含 `time.sleep(3)`，3 条 query 即冻结整个服务器 30~60s。相应地，「在 lifespan 挂载 MCP 客户端」一步前移到了 Task 7。
 
-第 3–6 项均为 2026-09-23 的缺陷排查所发现。**spec 本身不改** —— 它记录的是原始规划，偏离回写在本计划内，与该文档已有的做法一致。
+第 3–6 项均为 2026-09-23 的缺陷排查所发现。
+
+**范围说明：** 本计划只修本仓库（Agentic RAG 智能问答平台）自身的问题。仓库中曾存在一份描述「端云协同的直播主播经营 Agent 平台」的 PRD，那是另一个项目的规划 —— 与本仓库的实现、数据、验收标准均无关，且其场景在本仓库代码里从未落地（`backend/app`、`frontend/src`、README 里零处提及），已从本仓库移除。计划原先从该 PRD 引用的技术前提（事件协议、上下文分层预算）现已自包含。
 
 **类型一致性：** `AgentEvent` / `ToolSpec` / `ToolResult` / `AgentTask` / `AgentDeps` / `ContextEngine.build()` 的签名在 Task 4–8 中一致引用，无重命名漂移。
 
@@ -3698,9 +3591,9 @@ spec §4.9 的评测体系 v2 属 P1/P2，不在本计划范围。
 
 以下为 2026-09-23 排查新增：
 
-- **reranker 已实现但未接入查询链路**（Task 2 Step 6 / Step 9）。README 措辞已修正为「已实现、未启用」。接入留到 P1，与检索指标（Hit Rate / NDCG）一起做 —— 在 CPU 上精排 10 个候选约需 1~3 秒，会顶掉 spec §7「首 token < 800ms」的验收目标，需要先有数据证明它值这个代价
+- **reranker 已实现但未接入查询链路**（Task 2 Step 6 / Step 9）。README 措辞已修正为「已实现、未启用」。接入留到后续，与检索指标（Hit Rate / NDCG）一起做 —— 在 CPU 上精排 10 个候选约需 1~3 秒，会明显拖慢首 token 延迟，需要先有数据证明它值这个代价
 - **评测的 `context` 口径是近似的**（Task 7 Step 9）：用工具返回的 data 代替「真正进入 prompt 的检索片段」，因为 P0 的 Core 尚不发出 citation 事件。今后改动 Core 的引用机制时，必须同步复核此处，否则 faithfulness 分数的含义会悄悄漂移
-- **评测仍是串行 + 3s 间隔**（Task 7 Step 9）。spec §4.9 要求的「并发 + 信号量限流（并发度 4）」属评测 v2（P2）
+- **评测仍是串行 + 3s 间隔**（Task 7 Step 9）。并发执行 + 信号量限流属于评测体系的后续优化
 - **仍无认证与用户隔离**：`/api/conversations` 返回全库会话，任何人都能消耗 DeepSeek 额度。属 backlog
 - **依赖仍全部是 `>=` 下限**，仅 `mcp==2.2.0` 被钉死。属 backlog
 - **`docker-compose.yml` 的 MySQL root 密码硬编码默认值 `ragagent123`**（Task 10 Step 1c 只修了 LLM key 与 SerpAPI key 的透传）。属 backlog
