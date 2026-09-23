@@ -13,6 +13,8 @@ __pycache__/
 data/chroma/
 data/uploads/
 data/models/
+# BM25 索引产物：由 rank_bm25 构建后 pickle 落盘，属本地状态，不应入库
+data/bm25_index.pkl
 
 # Tooling caches
 .pytest_cache/
