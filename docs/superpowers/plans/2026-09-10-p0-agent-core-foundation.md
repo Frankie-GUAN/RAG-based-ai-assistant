@@ -3739,3 +3739,8 @@ Expected: `干净`
 - **重复上传同一份文件会重复入库**：Chroma 与 BM25 双向都会再加一遍，无去重
 - **`langchain_community.vectorstores.Chroma` 已是弃用导入**（提示迁移到 `langchain-chroma`），Task 2 动了那处构造函数但未迁移
 - **BM25 小语料陷阱**（写测试时反复踩到，已在测试注释里记）：`idf = log((N-df+0.5)/(df+0.5))`，只有 `df < N/2` 才为正；`df == N` 或 `N == 1` 时 idf 为负，被 epsilon 地板压成非正，`search()` 里 `score > 0` 的过滤会把结果全丢掉 —— 是 BM25 的数学，不是索引坏了
+- **降级状态下每 30s 会打一次完整堆栈日志**（约 2880 条/天，且来自请求路径），每次重试也真读一遍那 2MB pickle。可改为「首次记 exception、其后记一行 warning」+ 指数退避
+- **护栏触发时 Chroma 已经被写过**：上传会 500，而 Chroma 里已有 chunk、`DocumentModel` 行却没有。失败得响亮仍然是对的（跳过落盘会留下**错误**的内存索引，不只是没持久化），但在写 Chroma **之前**先探测一下 BM25 索引状态不花什么代价
+- **pid 后缀的临时文件会留下孤儿**：`pickle.dump` 中途失败（正是本次引用的 MemoryError 场景）会留下一个与索引同尺寸的 `.tmp`，而固定名字原本会被下次 save 复用。可在启动时清扫 `data/*.tmp`
+- **降级状态下每次 `get_bm25_index()` 都要拿 `_bm25_lock`**（即便节流命中直接返回），真正重试期间锁会持有整个 `pickle.load`，并发检索会串行排队。pickle 小可忽略，大则不然
+- `test_bm25_load_returns_false_when_a_pickled_class_is_gone` 是**特征化测试**而非先红后绿的回归测试（它在改造前后都绿）；它的价值在于断言比原来更强（`_pair[1] is not None` 能抓到「赋了一半」），但别把它当作覆盖了窄异常元组那个洞的证据

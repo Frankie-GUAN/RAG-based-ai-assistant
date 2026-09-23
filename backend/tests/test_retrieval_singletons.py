@@ -180,33 +180,52 @@ def test_bm25_add_refuses_to_overwrite_an_unreadable_index(monkeypatch, tmp_path
     旧行为下 get_bm25_index() 会把空索引固化，之后任意一次上传都会走 add() → save()，
     用「只有新 chunk」的索引覆盖上去 —— 2196 篇会变成新上传的这几篇，而仓库里没有从
     Chroma 重建 BM25 的路径，不可恢复。宁可让这次上传响亮地失败。
+
+    行为断言刻意排在 `_load_failed` 之前：后者引用的属性只有本提交之后才存在，先跑它
+    会让用例以 AttributeError 收尾，看不出护栏本身是否真的有效。
     """
-    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
-    index_path = tmp_path / "bm25_index.pkl"
+    index = _tmp_index(monkeypatch, tmp_path)
+    index_path = index._index_path
     unreadable = b"\x80\x05not-a-pickle"
     index_path.write_bytes(unreadable)
 
-    index = bm25_mod.BM25Index()
     assert index.load() is False
-    assert index._load_failed is True
 
     with pytest.raises(RuntimeError, match="拒绝以空白基础覆盖落盘"):
         index.add([Document(page_content="新片段")])
 
     assert index_path.read_bytes() == unreadable, "磁盘上那份必须原封不动"
+    assert index._load_failed is True
 
 
 def test_bm25_save_does_not_refuse_when_there_is_no_index_yet(monkeypatch, tmp_path):
     """反向护栏：全新库（没有索引文件）不是「加载失败」，首次上传必须能落盘。"""
-    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
-    index = bm25_mod.BM25Index()
+    index = _tmp_index(monkeypatch, tmp_path)
     assert index.load() is False
-    assert index._load_failed is False
 
     index.add([Document(page_content="劳动合同法第三十六条")])
 
     assert index.document_count == 1
-    assert (tmp_path / "bm25_index.pkl").exists()
+    assert index._index_path.exists()
+    assert index._load_failed is False
+
+
+def test_bm25_forced_save_clears_the_degraded_flag(monkeypatch, tmp_path):
+    """刻意重建是进程内唯一的出口。
+
+    force=True 落盘后必须清掉 _load_failed，否则磁盘已经修好了、护栏却还在拦 ——
+    add() 会永久失效（Task 6/7 的跨存储重建路径正会踩到这点）。
+    """
+    index = _tmp_index(monkeypatch, tmp_path)
+    index._index_path.write_bytes(b"\x80\x05broken")
+    assert index.load() is False
+
+    index.build([Document(page_content="劳动合同法第三十六条")])
+    index.save(force=True)
+
+    assert index._load_failed is False
+    index.add([Document(page_content="劳动者提前三十日书面通知用人单位")])
+    assert index.document_count == 2
 
 
 def test_get_bm25_index_retries_after_a_failed_load(monkeypatch, tmp_path):
@@ -214,11 +233,12 @@ def test_get_bm25_index_retries_after_a_failed_load(monkeypatch, tmp_path):
     monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
     monkeypatch.setattr(bm25_mod, "_bm25", None, raising=False)
     monkeypatch.setattr(bm25_mod, "_RETRY_INTERVAL_SECONDS", 0.0, raising=False)
+    # 与 _tmp_index 相同的安全阀：往磁盘写之前先确认目录确实被改到了 tmp_path
+    assert bm25_mod.BM25Index()._index_path.parent == tmp_path, "拒绝在 tmp_path 之外写索引文件"
 
     (tmp_path / "bm25_index.pkl").write_bytes(b"\x80\x05broken")
 
     first = bm25_mod.get_bm25_index()
-    assert first._load_failed is True
     assert first.document_count == 0
 
     # 故障排除：写一份真实可读的索引
@@ -229,8 +249,32 @@ def test_get_bm25_index_retries_after_a_failed_load(monkeypatch, tmp_path):
     retried = bm25_mod.get_bm25_index()
 
     assert retried is first, "重试应作用于同一个单例，而不是另建一个"
-    assert retried._load_failed is False
     assert retried.document_count == 1
+    assert retried._load_failed is False
+
+
+def test_get_bm25_index_does_not_reload_inside_the_retry_interval(monkeypatch, tmp_path):
+    """节流是防打盘机制：降级状态下反复调用不该反复 read 那 2MB 的 pickle。"""
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    monkeypatch.setattr(bm25_mod, "_bm25", None, raising=False)
+    assert bm25_mod.BM25Index()._index_path.parent == tmp_path, "拒绝在 tmp_path 之外写索引文件"
+
+    (tmp_path / "bm25_index.pkl").write_bytes(b"\x80\x05broken")
+    assert bm25_mod.get_bm25_index()._load_failed is True
+
+    calls = []
+    original_load = bm25_mod.BM25Index.load
+
+    def _counting_load(self):
+        calls.append(1)
+        return original_load(self)
+
+    monkeypatch.setattr(bm25_mod.BM25Index, "load", _counting_load)
+
+    for _ in range(20):
+        bm25_mod.get_bm25_index()
+
+    assert calls == [], "节流间隔内不该再次 load()"
 
 
 def test_negative_top_k_returns_nothing(monkeypatch, tmp_path):

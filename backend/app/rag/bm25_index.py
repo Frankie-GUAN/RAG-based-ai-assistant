@@ -47,16 +47,11 @@ class BM25Index:
         注意它统一的只是 BM25 这一侧：Chroma 由 vector_store.add_documents() 独立写入，
         两者之间没有事务 —— 中途失败会留下「Chroma 有、BM25 无」的分叉。跨存储的原子性
         是 Task 6/7 的待办，不在本方法职责内。
+
+        磁盘那份索引读不出来时，save() 会拒绝落盘。判断放在 save() 而不是这里，是因为
+        build()+save() 才是覆盖磁盘的那条路径 —— 不管谁调，都得过 save() 这一关。
         """
         with self._write_lock:
-            if self._load_failed:
-                # 磁盘那份额外的索引读不出来（且仓库里没有从 Chroma 重建的路径），
-                # 它此刻是唯一副本。用空白基础落盘会把 2196 篇变成新上传的这几篇 ——
-                # 这是不可逆的。宁可用例失败（响的），也不能静默毁数据。
-                raise RuntimeError(
-                    "BM25 索引文件存在但无法加载，拒绝以空白基础覆盖落盘以免丢失数据："
-                    f"{self._index_path}"
-                )
             self.build([*self._pair[0], *chunks])
             self.save()
 
@@ -72,24 +67,39 @@ class BM25Index:
         max_score = scores[ranked[0][0]] if ranked and scores[ranked[0][0]] > 0 else 1.0
         return [(documents[i], score / max_score) for i, score in ranked if score > 0]
 
-    def save(self) -> None:
+    def save(self, force: bool = False) -> None:
         """先写同目录下的临时文件，再 os.replace() 换上去。
+
+        _load_failed 时**拒绝落盘**：那份读不出来的索引是唯一副本，用内存里这个空索引
+        覆盖它会把 2196 篇变成新上传的这几篇，而仓库里目前没有从 Chroma 重建的路径，
+        不可逆。这里是唯一的收口点 —— 刻意重建（调用方已确保 documents 是完整集合）
+        时传 force=True，它同时会清掉 _load_failed。
 
         临时文件名带 pid：固定名字会让两个进程互相 rename 对方写了一半的文件。
 
         关于原子性：os.replace 在 POSIX 上是原子的；在 Win32 上它同样是「全有或全无」，
         但若目标文件正被另一个进程（或杀软/备份）打开着，它会抛 PermissionError ——
         此时**旧索引仍然完好**，这正是先写临时文件的意义，只是本次落盘失败。单进程内
-        不会发生（get_bm25_index 在同一把锁内 load，且赋值前文件已关闭）；多 worker
-        共享 data/ 时才会，属已知待办。实测未加原子写时，另一个进程 352 次读里有
-        325 次读到半截 pickle。
+        不可达：load() 是在把 (documents, index) 那一对发布出去之后才可能让别的线程
+        观察到 _load_failed=False 的，所以 add() 不会在空白基础上落盘。多 worker 共享
+        data/ 时才会，属已知待办。实测未加原子写时，另一个进程 352 次读里有 325 次
+        读到半截 pickle。
         """
+        if self._load_failed and not force:
+            raise RuntimeError(
+                "BM25 索引文件存在但无法加载，拒绝以空白基础覆盖落盘以免丢失数据："
+                f"{self._index_path}。恢复方式：修好或删除该文件（删除后重试会把它当作"
+                f"全新库），或用 force=True 表明你已重建出完整文档集。"
+            )
+
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         documents, index = self._pair
         tmp_path = self._index_path.parent / f"{self._index_path.name}.{os.getpid()}.tmp"
         with open(tmp_path, "wb") as f:
             pickle.dump({"documents": documents, "index": index}, f)
         os.replace(tmp_path, self._index_path)
+        if force:
+            self._load_failed = False  # 磁盘已被完整集合取代，自愈完成
 
     def load(self) -> bool:
         """索引加载不了时返回 False 且置 _load_failed，不抛异常。

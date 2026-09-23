@@ -63,6 +63,8 @@ Vue 3 单页应用 → FastAPI → LangGraph Agent → 混合检索 → ChromaDB
 
 两个建索引的调用点（`services/knowledge_service.process_document` 与 `tools/document_parser.parse_document`）都走 `get_bm25_index().add(chunks)`，BM25 这一侧已经不会再分叉。但 **Chroma 与 BM25 之间仍无事务**：`vector_store.add_documents()` 先写 Chroma，随后 BM25 写入若失败，就留下「Chroma 有、BM25 无」的不一致，而此时 `DocumentModel` 行尚未插入，没有可据以对账的记录。跨存储原子性是 Task 6/7 的待办。
 
+BM25 索引加载失败时**降级而不是崩溃**，但要理解这套语义才能安全地碰它：`load()` 宽捕所有异常并返回 `False`（pickle 里嵌着活的 `BM25Okapi`/`Document`，rank_bm25 升级或类改名会抛 `AttributeError`，窄元组接不住）；实例记住 `_load_failed`，`get_bm25_index()` 每 30s 重试一次，`save()` 在降级状态下**拒绝落盘** —— 磁盘上那份读不出来的索引是唯一副本，用内存里的空索引覆盖它会把 2196 篇变成新上传的几篇。恢复手段：修好或删除该文件（删除后重试视其为全新库），或 `save(force=True)`（调用方须已重建出完整集合，它会清掉标志）。注意**「索引是可重建的缓存」目前还不是事实** —— 仓库里没有从 Chroma 重建 BM25 的路径。
+
 ### 其他状态
 
 - `config.py` 暴露一个 `settings` 单例（pydantic-settings，读取**仓库根目录**的 `.env`）。`embed_model_path` / `reranker_model_path` 会优先使用 `data/models/` 下的本地副本，找不到才回退到 HuggingFace 模型 id。
