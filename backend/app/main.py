@@ -41,8 +41,14 @@ async def lifespan(app: FastAPI):
         import time
 
         started = time.perf_counter()
-        await asyncio.to_thread(_preload_retrieval)
-        logger.info("检索链路预载完成，耗时 %.2fs", time.perf_counter() - started)
+        try:
+            await asyncio.to_thread(_preload_retrieval)
+        except Exception:
+            # 预载只是延迟优化，绝不能用它换掉可用性：模型缺失、pickle 损坏都只该让
+            # 首次检索付代价。单例保持 None，懒加载路径照常工作。
+            logger.exception("检索链路预载失败，将在首次请求时重试")
+        else:
+            logger.info("检索链路预载完成，耗时 %.2fs", time.perf_counter() - started)
     yield
 
 

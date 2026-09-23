@@ -4,9 +4,12 @@
 它锁死「不许退回 functools.lru_cache」—— lru_cache 在 miss 时允许多线程同时进入
 被包装函数，对 2GB 模型就是偶发双份常驻内存。
 """
+import logging
+import pickle
 import threading
 
 import pytest
+from langchain_core.documents import Document
 
 from app.rag import bm25_index as bm25_mod
 from app.rag import reranker as reranker_mod
@@ -89,13 +92,129 @@ def test_bm25_index_is_shared(monkeypatch, tmp_path):
     assert bm25_mod.get_bm25_index() is bm25_mod.get_bm25_index()
 
 
-def test_bm25_search_is_safe_while_rebuilding():
-    """build() 整体替换 (documents, index)，search() 快照一次 —— 二者交错不得抛异常。
+def _tmp_index(monkeypatch, tmp_path) -> bm25_mod.BM25Index:
+    """构造一个落盘目录指向 tmp_path 的索引。
+
+    断言 _index_path 确实落在 tmp_path 里是道安全阀：真实 data/ 下躺着一份 2196 篇
+    文档的索引，下面这些用例要往 index_path 里写垃圾字节，monkeypatch 一旦失效就会把它
+    覆盖掉 —— 宁可用例失败，也不能毁掉真索引。
+    """
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    index = bm25_mod.BM25Index()
+    assert index._index_path.parent == tmp_path, "拒绝在 tmp_path 之外写索引文件"
+    return index
+
+
+# 「半截文件」的三种真实形态：进程被 SIGKILL / OOM 打断留下的截断 pickle、
+# 磁盘上的垃圾字节、以及刚 open() 就崩掉留下的空文件。
+_CORRUPT_PAYLOADS = {
+    "truncated": pickle.dumps(
+        {"documents": [Document(page_content="片段")], "index": None}
+    )[:20],
+    "garbage": b"\x80\x05not-a-pickle\xff\xff",
+    "empty": b"",
+}
+
+
+@pytest.mark.parametrize(
+    "payload", list(_CORRUPT_PAYLOADS.values()), ids=list(_CORRUPT_PAYLOADS)
+)
+def test_bm25_load_returns_false_on_corrupt_file(
+    monkeypatch, tmp_path, payload, caplog
+):
+    """索引文件损坏时 load() 返回 False，**不抛异常**。
+
+    load() 跑在 lifespan 的预载里，抛出去就不是「某次检索失败」，而是整个 API 起不来。
+    索引是可重建的，没什么值得为它崩掉。
+    """
+    index = _tmp_index(monkeypatch, tmp_path)
+    index._index_path.write_bytes(payload)
+
+    with caplog.at_level(logging.ERROR, logger="app.rag.bm25_index"):
+        assert index.load() is False
+
+    assert index.document_count == 0
+    assert index.search("片段") == []
+    assert caplog.records, "损坏文件必须留一条日志，不能静默吞掉"
+
+
+def test_bm25_singleton_survives_corrupt_file(monkeypatch, tmp_path):
+    """lifespan 预载走的就是这条路径：损坏文件不该让 get_bm25_index() 抛出去。"""
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    (tmp_path / "bm25_index.pkl").write_bytes(b"\x80\x05half a pickle")
+
+    index = bm25_mod.get_bm25_index()  # 不抛
+    assert index._index_path.parent == tmp_path, "拒绝在 tmp_path 之外写索引文件"
+
+    assert index.document_count == 0
+    assert index.search("片段") == []
+
+
+def test_bm25_build_with_untokenizable_corpus_does_not_raise(monkeypatch, tmp_path):
+    """空 PDF 页 / 纯空白 txt 会产出 `corpus = [[]]`，那是**真值**，但 BM25Okapi 内部
+    要算 idf_sum / len(idf)，直接 ZeroDivisionError；upload 接口不做空内容过滤。
+
+    守卫必须是 any(corpus)：一条文档都分不出词时，索引退化成 None，
+    search() 返回 [] 而不是炸掉。
+    """
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    index = bm25_mod.BM25Index()
+
+    index.build([Document(page_content="")])
+    assert index.document_count == 1
+    assert index._pair[1] is None
+    assert index.search("片段") == []
+
+    index.build([Document(page_content="----")])  # 正则分不出任何 token
+    assert index.document_count == 1
+    assert index._pair[1] is None
+    assert index.search("----") == []
+
+    index.build([])  # 空文档列表同样是退化路径
+    assert index.document_count == 0
+    assert index.search("片段") == []
+
+
+def test_bm25_build_with_mixed_empty_and_real_pages(monkeypatch, tmp_path):
+    """真实上传里空页与有内容的页混在一起，这时索引必须正常建起来。
+
+    注意这里放了三篇而不是两篇：BM25Okapi 对「2 篇里出现 1 篇」的词算出的 idf 恰好是
+    log(1.5)-log(1.5)=0，检索会返回空列表 —— 那是 BM25 的数学，不是索引坏了。
+    """
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
+    index = bm25_mod.BM25Index()
+
+    index.build(
+        [
+            Document(page_content=""),
+            Document(page_content="劳动合同法第三十六条规定协商一致可以解除劳动合同"),
+            Document(page_content="Python是一种广泛使用的高级编程语言"),
+        ]
+    )
+
+    assert index.document_count == 3
+    assert index._pair[1] is not None
+    results = index.search("劳动合同", top_k=5)
+    assert [doc.page_content for doc, _ in results] == [
+        "劳动合同法第三十六条规定协商一致可以解除劳动合同"
+    ]
+
+
+def test_bm25_search_is_safe_while_rebuilding(monkeypatch, tmp_path):
+    """build() 把 (documents, index) 作为一对整体换掉，search() 只快照一次 —— 交错不抛异常。
 
     真实触发场景：同一个 ReAct 轮次里模型并发发起 parse_document 与 search_documents。
-    若 build 分别替换两个属性，search 会读到长度不匹配的一对，直接 IndexError。
+    若 build 分两步写（旧实现先写 _documents、分词建完索引再写 _index），search 就会读到
+    长度不匹配的一对，`documents[i]` 直接 IndexError。
+
+    重建刻意分成「先涨后缩」两段：**只有增长段测不出问题** —— 旧实现被抢占时留下的是
+    「documents 长、index 短」的失配，而 search 只按下标取 documents，多出来的文档根本
+    碰不到，所以不越界。必须让文档数缩回去（重解析后 chunk 变少就是这种情况），失配才
+    翻转成「index 长、documents 短」，越界才暴露出来。
+    对旧实现实测：只跑增长段 9 次运行 0 次触发；加上收缩段后 9/9 触发
+    IndexError('list index out of range')（换短文本重复 10/10）。
     """
-    from langchain_core.documents import Document
+    monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
 
     index = bm25_mod.BM25Index()
     index.build([Document(page_content=f"旧片段{i}") for i in range(3)])
@@ -115,14 +234,20 @@ def test_bm25_search_is_safe_while_rebuilding():
     for t in threads:
         t.start()
 
+    # 增长段：3 -> 100 个片段（新文档入库）
     for round_no in range(50):
         index.build([Document(page_content=f"新片段{round_no}-{i}") for i in range(100)])
+
+    # 收缩段：100 -> 3 个片段（重解析后 chunk 变少）。这一段的失配方向才是致命的。
+    for round_no in range(50):
+        index.build([Document(page_content=f"小片段{round_no}-{i}") for i in range(3)])
 
     stop.set()
     for t in threads:
         t.join()
 
     assert failures == []
+    assert index.document_count == 3
 
 
 def test_reranker_is_singleton(monkeypatch):

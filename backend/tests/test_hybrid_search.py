@@ -48,6 +48,9 @@ def test_vector_side_requests_hybrid_top_k(monkeypatch):
     get_retriever() 把 k 硬编码成 settings.top_k，于是 hybrid_search 的
     vector_top_k 参数被无声忽略、settings.hybrid_top_k 成为死配置 ——
     RRF 实际融合的是 4 路向量结果 + 10 路 BM25 结果，而非 10+10。
+
+    这里刻意把 hybrid_top_k 设成 7（**不是** app/config.py 里的默认值 10）：
+    若断了回归写成 `vector_top_k or 10` 这类硬编码，断言就会失败。
     """
     requested = {}
 
@@ -56,8 +59,8 @@ def test_vector_side_requests_hybrid_top_k(monkeypatch):
         return _EmptyRetriever()
 
     monkeypatch.setattr(hybrid_mod, "get_retriever", _fake_get_retriever)
-    monkeypatch.setattr(hybrid_mod.settings, "hybrid_top_k", 10, raising=False)
+    monkeypatch.setattr(hybrid_mod.settings, "hybrid_top_k", 7, raising=False)
 
     hybrid_mod.hybrid_search("劳动合同如何解除", _EmptyBM25())
 
-    assert requested["k"] == 10
+    assert requested["k"] == 7

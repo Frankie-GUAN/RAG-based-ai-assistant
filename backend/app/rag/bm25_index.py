@@ -1,3 +1,5 @@
+import logging
+import os
 import pickle
 import threading
 from typing import List, Tuple
@@ -7,6 +9,8 @@ from rank_bm25 import BM25Okapi
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 class BM25Index:
     def __init__(self):
@@ -14,14 +18,6 @@ class BM25Index:
         self._pair: tuple[List[Document], BM25Okapi | None] = ([], None)
         self._write_lock = threading.Lock()
         self._index_path = settings.data_dir / "bm25_index.pkl"
-
-    @property
-    def _documents(self) -> List[Document]:
-        return self._pair[0]
-
-    @property
-    def _index(self) -> BM25Okapi | None:
-        return self._pair[1]
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
@@ -31,11 +27,19 @@ class BM25Index:
 
     def build(self, documents: List[Document]) -> None:
         corpus = [self._tokenize(doc.page_content) for doc in documents]
-        index = BM25Okapi(corpus) if corpus else None
+        # any(corpus) 而不是 corpus：`corpus = [[]]` 是**真值**，而 BM25Okapi._calc_idf
+        # 会做 idf_sum / len(self.idf) —— 语料整体分不出词就是 ZeroDivisionError。
+        # 空 PDF 页、纯空白 .txt 都会走到这里，而 upload 接口不做空内容过滤。
+        index = BM25Okapi(corpus) if any(corpus) else None
         self._pair = (list(documents), index)  # 原子替换
 
     def add(self, chunks: List[Document]) -> None:
-        """把新片段并入索引并落盘。两条建索引路径共用此方法，避免 Chroma 与 BM25 分叉。"""
+        """把新片段并入索引并落盘。两条 BM25 建索引路径共用此方法。
+
+        注意它统一的只是 BM25 这一侧：Chroma 由 vector_store.add_documents() 独立写入，
+        两者之间没有事务 —— 中途失败会留下「Chroma 有、BM25 无」的分叉。跨存储的原子性
+        是 Task 6/7 的待办，不在本方法职责内。
+        """
         with self._write_lock:
             self.build([*self._pair[0], *chunks])
             self.save()
@@ -51,17 +55,35 @@ class BM25Index:
         return [(documents[i], score / max_score) for i, score in ranked if score > 0]
 
     def save(self) -> None:
+        """先写同目录下的临时文件，再 os.replace() 换上去。
+
+        os.replace 在 POSIX 与 Win32 上都是原子的，所以并发的读者要么看到旧文件、
+        要么看到新文件，不会读到写了一半的 pickle（实测未加原子写时 352 次写里
+        有 325 次被另一个进程读成 UnpicklingError / EOFError）。
+        """
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         documents, index = self._pair
-        with open(self._index_path, "wb") as f:
+        tmp_path = self._index_path.parent / (self._index_path.name + ".tmp")
+        with open(tmp_path, "wb") as f:
             pickle.dump({"documents": documents, "index": index}, f)
+        os.replace(tmp_path, self._index_path)
 
     def load(self) -> bool:
+        """文件损坏时返回 False，不抛异常。
+
+        索引是可重建的，没什么值得为它崩掉：这个 pickle 被 SIGKILL / OOM 打断就是半截
+        文件，而 get_bm25_index() 现在跑在 lifespan 里 —— 抛出去就不是「某次检索失败」，
+        而是整个 API 起不来。
+        """
         if not self._index_path.exists():
             return False
-        with open(self._index_path, "rb") as f:
-            data = pickle.load(f)
-        self._pair = (data["documents"], data["index"])
+        try:
+            with open(self._index_path, "rb") as f:
+                data = pickle.load(f)
+            self._pair = (data["documents"], data["index"])
+        except (pickle.UnpicklingError, EOFError, OSError):
+            logger.exception("BM25 索引文件损坏，已忽略：%s", self._index_path)
+            return False
         return True
 
     @property

@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
+from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from app.config import settings
@@ -62,12 +63,13 @@ def get_vectorstore(create: bool = False) -> Optional[Chroma]:
 
 def add_documents(documents: List[Document]) -> Chroma:
     vectorstore = get_vectorstore(create=True)
-    assert vectorstore is not None
+    if vectorstore is None:  # create=True 之下不会发生，只为收窄 Optional
+        raise RuntimeError("Failed to create the vector store")
     vectorstore.add_documents(documents)
     return vectorstore
 
 
-def get_retriever(k: int | None = None):
+def get_retriever(k: int | None = None) -> VectorStoreRetriever:
     """k 默认取 hybrid_top_k（每路召回的候选数），**不是** top_k（最终返回数）。
 
     此前这里硬编码 settings.top_k=4，导致 hybrid_search 的 vector_top_k 参数

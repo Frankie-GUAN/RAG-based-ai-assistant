@@ -1,6 +1,18 @@
 import pytest
 from langchain_core.documents import Document
 
+from app.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _disable_model_preload(monkeypatch):
+    """关掉 lifespan 里的检索链路预载。
+
+    `with TestClient(app)` 会跑 lifespan，预载要加载约 2GB 的 BGE-M3；
+    一个只想测接口的用例不该为此付几分钟。想测预载本身的用例自己覆盖这个值即可。
+    """
+    monkeypatch.setattr(settings, "preload_models", False)
+
 
 @pytest.fixture
 def sample_documents():

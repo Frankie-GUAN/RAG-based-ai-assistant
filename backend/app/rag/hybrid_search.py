@@ -46,9 +46,13 @@ def hybrid_search(
     final_top_k: int | None = None,
 ) -> List[Tuple[Document, float]]:
     """两路各召回 hybrid_top_k 个候选，RRF 融合后返回 top_k 个。"""
-    vector_top_k = vector_top_k or settings.hybrid_top_k
-    bm25_top_k = bm25_top_k or settings.hybrid_top_k
-    final_top_k = final_top_k or settings.top_k
+    # 用 is None 而不是 `or`：0 是合法取值（"这一路不要候选"），不该被当成"没传"
+    if vector_top_k is None:
+        vector_top_k = settings.hybrid_top_k
+    if bm25_top_k is None:
+        bm25_top_k = settings.hybrid_top_k
+    if final_top_k is None:
+        final_top_k = settings.top_k
 
     vector_results = _vector_search(query, top_k=vector_top_k)
     bm25_results = bm25_index.search(query, top_k=bm25_top_k)

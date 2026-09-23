@@ -24,11 +24,11 @@ class Reranker:
         return [(doc, float(score)) for (doc, _), score in ranked[:top_k]]
 
 
-_reranker: "Reranker | None" = None
+_reranker: Reranker | None = None
 _reranker_lock = threading.Lock()
 
 
-def get_reranker() -> "Reranker":
+def get_reranker() -> Reranker:
     """Cross-Encoder 的进程内单例。
 
     本轮不接入查询链路（CPU 上精排 10 个候选约需 1~3 秒，会顶掉「首 token < 800ms」
