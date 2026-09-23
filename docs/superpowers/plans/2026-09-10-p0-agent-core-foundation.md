@@ -96,6 +96,7 @@
 | `backend/app/services/chat_service.py` | 改为 async，走 Agent Core |
 | `frontend/src/composables/useChat.ts` | 适配新事件格式 |
 | `backend/app/rag/vector_store.py` | embeddings 与 Chroma 句柄单例化（Task 2） |
+| `backend/app/rag/hybrid_search.py` | 向量侧改用 `hybrid_top_k` 召回候选（Task 2） |
 | `backend/app/rag/bm25_index.py` | 单例化 + 原子替换 `(documents, index)`（Task 2） |
 | `backend/app/rag/reranker.py` | 单例化，但**本轮不接入查询链路**（Task 2） |
 | `backend/app/services/knowledge_service.py` | 改用 `get_bm25_index().add()`（Task 2） |
@@ -249,15 +250,19 @@ pytest was never installed, so the 4 existing test files could not run."
 
 对 2GB 模型，这就是偶发的双份常驻内存 —— 正是要防的那件事。必须用显式双检锁。
 
+**本任务同时修第二个缺陷：向量侧只召回 4 个候选。** `get_retriever()` 把 k 硬编码成 `settings.top_k`（=4），于是 `hybrid_search(vector_top_k=10)` 传进来的值被无声忽略，而 `settings.hybrid_top_k = 10` **在整个代码库里从未被任何地方引用**。结果 RRF 融合的是 4 路向量结果 + 10 路 BM25 结果，而非 10+10 —— 这直接削弱了混合检索的召回率。它和单例化改的是同一个文件（`get_retriever` 与 `_vector_search`），因此并入本任务。见 Step 8–11。
+
 **Files:**
 - Modify: `backend/app/rag/vector_store.py`
 - Modify: `backend/app/rag/bm25_index.py`
+- Modify: `backend/app/rag/hybrid_search.py`
 - Modify: `backend/app/rag/reranker.py`
 - Modify: `backend/app/services/knowledge_service.py`
 - Modify: `backend/app/tools/document_parser.py`
 - Modify: `backend/app/tools/document_search.py`
 - Modify: `backend/app/config.py`
 - Modify: `backend/app/main.py`
+- Modify: `backend/tests/test_hybrid_search.py`
 - Modify: `README.md`
 - Create: `backend/tests/test_retrieval_singletons.py`
 
@@ -497,11 +502,17 @@ def add_documents(documents: List[Document]) -> Chroma:
     return vectorstore
 
 
-def get_retriever():
+def get_retriever(k: int | None = None):
+    """k 默认取 hybrid_top_k（每路召回的候选数），**不是** top_k（最终返回数）。
+
+    此前这里硬编码 settings.top_k=4，导致 hybrid_search 的 vector_top_k 参数
+    被无声忽略、settings.hybrid_top_k 成为死配置 —— RRF 实际只融合了 4 路
+    向量结果。修正见 Step 8–11。
+    """
     vectorstore = get_vectorstore()
     if vectorstore is None:
         raise ValueError("No persisted vector store found")
-    return vectorstore.as_retriever(search_kwargs={"k": settings.top_k})
+    return vectorstore.as_retriever(search_kwargs={"k": k or settings.hybrid_top_k})
 ```
 
 注意：`Chroma.from_documents(...)` 的旧分支已消失 —— 对空集合调用 `add_documents` 等价且更简单。同时删掉 `load_vectorstore`（`knowledge_service.py` 曾导入它但从未调用）。
@@ -658,7 +669,100 @@ def search_documents(query: str, top_k: int = 4) -> str:
 
 顺带把 `backend/app/services/knowledge_service.py` 与 `backend/app/tools/document_parser.py` 里重复的「load → extend → build → save」逻辑删掉 —— 这正是 CLAUDE.md 里记的「两条建索引路径可能分叉」的根源，现在只剩 `add()` 一处。
 
-- [ ] **Step 8: 在 `backend/app/main.py` 的 lifespan 中预热**
+- [ ] **Step 8: 在 `backend/tests/test_hybrid_search.py` 追加失败的测试**
+
+该文件已存在（3 条 `_rrf_fuse` 用例），直接追加：
+
+```python
+import pytest
+
+from app.rag import hybrid_search as hybrid_mod
+
+
+class _EmptyRetriever:
+    def invoke(self, query):
+        return []
+
+
+class _EmptyBM25:
+    def search(self, query, top_k=10):
+        return []
+
+
+def test_vector_side_requests_hybrid_top_k(monkeypatch):
+    """回归：向量侧过去固定只召回 settings.top_k=4 个候选。
+
+    get_retriever() 把 k 硬编码成 settings.top_k，于是 hybrid_search 的
+    vector_top_k 参数被无声忽略、settings.hybrid_top_k 成为死配置 ——
+    RRF 实际融合的是 4 路向量结果 + 10 路 BM25 结果，而非 10+10。
+    """
+    requested = {}
+
+    def _fake_get_retriever(k=None):
+        requested["k"] = k
+        return _EmptyRetriever()
+
+    monkeypatch.setattr(hybrid_mod, "get_retriever", _fake_get_retriever)
+    monkeypatch.setattr(hybrid_mod.settings, "hybrid_top_k", 10, raising=False)
+
+    hybrid_mod.hybrid_search("劳动合同如何解除", _EmptyBM25())
+
+    assert requested["k"] == 10
+```
+
+- [ ] **Step 9: 运行测试，确认失败**
+
+```bash
+cd backend
+../.venv/Scripts/python.exe -m pytest tests/test_hybrid_search.py -v
+```
+
+Expected: 1 failed, 3 passed —— 新用例拿到 `k=None`，因为 `_vector_search` 从未把 `top_k` 传给 retriever
+
+- [ ] **Step 10: 修正 `backend/app/rag/hybrid_search.py`**
+
+`_vector_search` 必须把 `top_k` 传下去；`hybrid_search` 的三个默认值改从配置读取，让 `hybrid_top_k`（每路召回的候选数）与 `top_k`（最终返回数）各司其职。
+
+```python
+def _vector_search(query: str, top_k: int) -> List[Tuple[Document, float]]:
+    retriever = get_retriever(top_k)          # ← 此前这个 k 被忽略
+    docs = retriever.invoke(query)
+    # 这里是名次占位分，不是相似度。RRF 只用名次，故不影响融合结果，
+    # 但不要把它当相关度读。
+    return [(doc, 1.0 - i * 0.05) for i, doc in enumerate(docs)][:top_k]
+
+
+def hybrid_search(
+    query: str,
+    bm25_index: BM25Index,
+    vector_top_k: int | None = None,
+    bm25_top_k: int | None = None,
+    final_top_k: int | None = None,
+) -> List[Tuple[Document, float]]:
+    """两路各召回 hybrid_top_k 个候选，RRF 融合后返回 top_k 个。"""
+    vector_top_k = vector_top_k or settings.hybrid_top_k
+    bm25_top_k = bm25_top_k or settings.hybrid_top_k
+    final_top_k = final_top_k or settings.top_k
+
+    vector_results = _vector_search(query, top_k=vector_top_k)
+    bm25_results = bm25_index.search(query, top_k=bm25_top_k)
+    return _rrf_fuse(vector_results, bm25_results, top_k=final_top_k)
+```
+
+`get_retriever` 的签名已在 Step 4 改好（`k: int | None = None`，默认取 `hybrid_top_k`）。
+
+注意调用方 `document_search.search_documents(query, top_k=4)` 仍显式传 `final_top_k`，返回条数不变 —— 变的只是**候选池**从 4 扩到 10。
+
+- [ ] **Step 11: 运行测试，确认通过**
+
+```bash
+cd backend
+../.venv/Scripts/python.exe -m pytest tests/test_hybrid_search.py -v
+```
+
+Expected: 4 passed
+
+- [ ] **Step 12: 在 `backend/app/main.py` 的 lifespan 中预热**
 
 ```python
 import asyncio
@@ -691,11 +795,11 @@ async def lifespan(app: FastAPI):
     yield
 ```
 
-- [ ] **Step 9: 修正 README 关于 reranker 的措辞**
+- [ ] **Step 13: 修正 README 关于 reranker 的措辞**
 
 README 的架构图画了 `Cross-Encoder Reranker → Top-4` 这一级，但查询链路从不调用它。**本轮不接线**（理由见 Step 6），所以必须把这条宣称改成实话 —— 在 README 的架构图与「项目亮点」里把它标注为「已实现、未启用，P1 接入并附检索指标」。
 
-- [ ] **Step 10: 运行测试，确认通过**
+- [ ] **Step 14: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -704,7 +808,7 @@ cd backend
 
 Expected: 5 passed
 
-- [ ] **Step 11: 手工确认收益**
+- [ ] **Step 15: 手工确认收益**
 
 ```bash
 cd backend
@@ -719,7 +823,7 @@ print(f'首次 {t1-t0:.2f}s / 二次 {t2-t1:.4f}s')
 
 Expected: 二次调用接近 0（改造前实测 2.29s）
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 16: Commit**
 
 ```bash
 git add -A backend/app backend/tests README.md
@@ -735,7 +839,13 @@ from several threads on a cache miss, which is the double-load we are
 trying to prevent.
 
 BM25Index.build() now swaps (documents, index) as one tuple so a search
-racing a rebuild cannot read a mismatched pair."
+racing a rebuild cannot read a mismatched pair.
+
+Retrieval also only ever fused four vector candidates: get_retriever()
+hardcoded k=settings.top_k, so hybrid_search's vector_top_k was silently
+ignored and settings.hybrid_top_k was dead config. The two settings now
+mean what their names say — hybrid_top_k per source, top_k for the
+final result count."
 ```
 
 ---
@@ -3574,7 +3684,7 @@ Expected: `干净`
 
 1. **Agent 协议提前到 P0（现 Task 4）**。最初排在后续阶段，但 MCP、Agent Core、流式三者都要发事件，协议必须先有。
 2. **上下文引擎从第 6 位提前到第 3 位（现 Task 5）**。原顺序下 Agent Core 要调用尚不存在的上下文引擎，构成循环依赖。
-3. **新增 Task 2「检索链路单例化」**。Task 7 的 Agent Core 会用 `asyncio.gather` 并发调用工具，而 `get_embeddings()` 每次调用都重建 BGE-M3（实测 9.82s 冷 / 2.29s 温）。不改则并发下会同时加载 N 份约 2GB 的模型 —— 这是 Task 6/7 的前置条件，不是可选优化。
+3. **新增 Task 2「检索链路单例化」**。Task 7 的 Agent Core 会用 `asyncio.gather` 并发调用工具，而 `get_embeddings()` 每次调用都重建 BGE-M3（实测 9.82s 冷 / 2.29s 温）。不改则并发下会同时加载 N 份约 2GB 的模型 —— 这是 Task 6/7 的前置条件，不是可选优化。同任务顺带修了向量侧召回被截断的问题：`get_retriever()` 硬编码 `k=settings.top_k`，使 `hybrid_search` 的 `vector_top_k` 参数失效、`settings.hybrid_top_k` 成为死配置，RRF 实际只融合 4 路向量结果。
 4. **新增 Task 3「消息时序确定性」**。`messages.created_at` 秒精度 + `save_message` 不 flush，导致同一次问答的两条消息时间戳完全相同（实测 id 35/36 均为 `2026-06-03 17:58:52`），而关系正按 `created_at` 排序。它同时影响喂给摘要的 transcript 顺序，因此也是 Task 9 的前置。
 5. **新增 Task 9「滚动增量摘要」**。原实现只在 `summary` 为空时摘要一次，之后窗口外的中间消息静默丢失。修复需要记录摘要的覆盖边界，因而新增 `summary_upto_message_id` 字段，并附带一个幂等列检查（`app/db/migrate.py`）—— 因为 `create_all` 不会给已有表加列。
 6. **新增 Task 10「评测链路收尾与回归」**。最初的「修改」清单遗漏了 `app/services/evaluation_service.py`（它 import 了将被删除的 `agent_graph`），且该模块是 `async` 端点里直接调用的同步函数、内含 `time.sleep(3)`，3 条 query 即冻结整个服务器 30~60s。相应地，「在 lifespan 挂载 MCP 客户端」一步前移到了 Task 7。
