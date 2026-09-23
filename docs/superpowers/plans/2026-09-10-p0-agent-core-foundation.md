@@ -129,7 +129,7 @@
 - Modify: `backend/requirements.txt`
 - Create: `backend/requirements-dev.txt`
 
-- [ ] **Step 1: 确认死依赖确实没被引用**
+- [x] **Step 1: 确认死依赖确实没被引用**
 
 ```bash
 cd backend
@@ -138,7 +138,7 @@ grep -rn "google.generativeai\|langchain_google_genai\|ragas" app/ tests/ || ech
 
 Expected: 输出 `确认：无任何引用`
 
-- [ ] **Step 2: 确认 `ToolRegistry` 只被将要删除的文件引用**
+- [x] **Step 2: 确认 `ToolRegistry` 只被将要删除的文件引用**
 
 ```bash
 cd backend
@@ -154,7 +154,7 @@ Expected: 命中 `app/tools/registry.py`、`app/tools/schemas.py`、`app/tools/d
 
 补充（2026-09-23）：`app/services/evaluation_service.py` 同样 import 了 `agent_graph` 与 `AgentState`，原计划漏了它。Task 7 Step 9 / Step 10 已补上对应的处理步骤。
 
-- [ ] **Step 3: 重写 `backend/requirements.txt`**
+- [x] **Step 3: 重写 `backend/requirements.txt`**
 
 ```
 fastapi>=0.115.0
@@ -191,14 +191,14 @@ google-search-results>=2.4.2
 
 注意：`langchain` 已从 `>=0.3.0` 提升到 `>=1.0.0`（实际安装的是 1.2.18，原下限与实装严重脱节）；`ragas` 与两个 gemini 包移除。
 
-- [ ] **Step 4: 新建 `backend/requirements-dev.txt`**
+- [x] **Step 4: 新建 `backend/requirements-dev.txt`**
 
 ```
 -r requirements.txt
 pytest>=8.0.0
 ```
 
-- [ ] **Step 5: 安装并验证依赖可解析**
+- [x] **Step 5: 安装并验证依赖可解析**
 
 ```bash
 cd backend
@@ -207,7 +207,7 @@ cd backend
 
 Expected: 成功，无冲突。`mcp==2.2.0` 被安装。
 
-- [ ] **Step 6: 验证 pytest 与 mcp 可用**
+- [x] **Step 6: 验证 pytest 与 mcp 可用**
 
 ```bash
 cd backend
@@ -217,7 +217,7 @@ cd backend
 
 Expected: 打印 pytest 版本号，以及 `mcp ok`
 
-- [ ] **Step 7: 验证应用仍能导入**
+- [x] **Step 7: 验证应用仍能导入**
 
 ```bash
 cd backend
@@ -226,7 +226,7 @@ cd backend
 
 Expected: `app imports ok`（此时尚未删除 registry，仍可导入）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/requirements.txt backend/requirements-dev.txt
