@@ -57,9 +57,11 @@ Vue 3 单页应用 → FastAPI → LangGraph Agent → 混合检索 → ChromaDB
 - `rag/vector_store.py` —— Chroma 持久化在 `data/chroma`，BGE-M3（1024 维、归一化、CPU）。
 - `rag/bm25_index.py` —— pickle 文件 `data/bm25_index.pkl`，内含 `{documents, index}`，分词器对中文做了处理。
 
-`hybrid_search()` 用 RRF（k=60）融合两路结果，以 `page_content[:200]` 作为去重键。**`rag/reranker.py` 已实现且有单元测试，但没有接入查询链路** —— `hybrid_search` 的结果直接进 prompt，尽管 README 的架构图画了 Cross-Encoder 这一级。
+`hybrid_search()` 用 RRF（k=60）融合两路结果，以 `page_content[:200]` 作为去重键。两路各召回 `settings.hybrid_top_k`（10）个候选，最终返回 `settings.top_k`（4）个。**`rag/reranker.py` 已实现且有单元测试，但没有接入查询链路** —— `hybrid_search` 的结果直接进 prompt。README 已按实情修正为「已实现、未启用」，并注明接入需先付 1~3 秒 CPU 精排的代价。
 
-两个建索引的调用点（`services/knowledge_service.process_document` 与 `tools/document_parser.parse_document`）重复了同一套「先 Chroma 再 BM25」流程。只改其中一个而漏掉另一个，会让两个索引静默地产生分歧。
+检索链路（embeddings、Chroma 句柄、BM25 索引、reranker）都是**进程内单例**，用显式双检锁而非 `lru_cache`（后者在 cache miss 时允许多线程同时进入被包装函数，对 2GB 的 BGE-M3 等于偶发双份常驻内存）。启动时 lifespan 会经 `asyncio.to_thread` 预热，受 `settings.preload_models` 控制；`tests/conftest.py` 有一个 autouse fixture 把它关掉，避免测试里加载真实模型。
+
+两个建索引的调用点（`services/knowledge_service.process_document` 与 `tools/document_parser.parse_document`）都走 `get_bm25_index().add(chunks)`，BM25 这一侧已经不会再分叉。但 **Chroma 与 BM25 之间仍无事务**：`vector_store.add_documents()` 先写 Chroma，随后 BM25 写入若失败，就留下「Chroma 有、BM25 无」的不一致，而此时 `DocumentModel` 行尚未插入，没有可据以对账的记录。跨存储原子性是 Task 6/7 的待办。
 
 ### 其他状态
 
@@ -92,8 +94,9 @@ GSAP 动画统一使用同一套写法：模块作用域的 `let ctx`，`onMount
 
 - README 宣称使用 MCP 协议；但 `tools/registry.py` 只是一个普通 dict 加手写 schema，`app/` 里没有任何地方 import `mcp`。
 - README 宣称 SSE 流式输出；但 `chat.py` 会等完整答案生成后，再按 4 个字符切片并 `await asyncio.sleep(0.02)` 伪造成流式（`chat.py:75-78`）。
-- README 的链路图里画了 reranker 阶段，但查询链路从未调用它。
 - `docker-compose.yml` 给后端传的是 `GEMINI_API_KEY`，而 `config.py` 读的是 `DEEPSEEK_API_KEY` —— 用 Docker 部署会拿不到任何 LLM key。compose 也从未透传 `SERPAPI_KEY`，所以那里的联网搜索始终是关闭的。
+
+（README 关于 reranker 的那处宣称已由 Task 2 修正，不再是言行不符项。上面两条要等 Task 6 和 Task 8 落地后才消。）
 
 ## 约定
 
