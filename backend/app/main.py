@@ -1,8 +1,11 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.db.base import Base
 from app.db.session import engine
 from app.api.chat import router as chat_router
@@ -16,10 +19,30 @@ import app.models.message       # noqa: F401
 import app.models.document      # noqa: F401
 import app.models.evaluation    # noqa: F401
 
+logger = logging.getLogger(__name__)
+
+
+def _preload_retrieval() -> None:
+    """在启动线程里把检索链路拉起来，避免第一个请求付 10s 冷启动、
+    也避免并发请求一起去加载。"""
+    from app.rag.bm25_index import get_bm25_index
+    from app.rag.vector_store import get_embeddings, get_vectorstore, has_persisted_index
+
+    get_embeddings()
+    if has_persisted_index():
+        get_vectorstore()
+    get_bm25_index()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    if settings.preload_models:
+        import time
+
+        started = time.perf_counter()
+        await asyncio.to_thread(_preload_retrieval)
+        logger.info("检索链路预载完成，耗时 %.2fs", time.perf_counter() - started)
     yield
 
 

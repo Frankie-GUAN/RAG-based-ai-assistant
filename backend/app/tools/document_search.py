@@ -1,14 +1,10 @@
 from app.rag.hybrid_search import hybrid_search
-from app.rag.bm25_index import BM25Index
+from app.rag.bm25_index import get_bm25_index
 from app.tools.registry import tool_registry
 
 
 def search_documents(query: str, top_k: int = 4) -> str:
-    bm25 = BM25Index()
-    if bm25.document_count == 0:
-        bm25.load()
-
-    results = hybrid_search(query, bm25, final_top_k=top_k)
+    results = hybrid_search(query, get_bm25_index(), final_top_k=top_k)
     if not results:
         return "未找到相关文档"
 

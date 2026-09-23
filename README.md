@@ -13,7 +13,7 @@
 | 向量存储 | ChromaDB（本地持久化） |
 | 关键词检索 | BM25（rank-bm25） |
 | 混合检索 | RRF 融合（向量 + BM25） |
-| 重排序 | BAAI/bge-reranker-v2-m3（Cross-Encoder，本地） |
+| 重排序 | BAAI/bge-reranker-v2-m3（Cross-Encoder，本地，已实现未启用） |
 | 评估 | LLM-as-Judge（忠实度 + 相关性评分） |
 | 数据库 | MySQL 8.0 + SQLAlchemy ORM |
 | 部署 | Docker Compose |
@@ -41,14 +41,19 @@
 │  └──────────────────┬──────────────────────────┘ │
 │                     │                              │
 │  ┌──────────────────▼──────────────────────────┐ │
-│  │            混合检索 + Reranker               │ │
+│  │            混合检索 + RRF 融合              │ │
 │  │  BGE-M3 (Dense) + BM25 (Sparse) → RRF →     │ │
-│  │  Cross-Encoder Reranker → Top-4              │ │
+│  │  Top-4（Cross-Encoder 已实现、未启用）      │ │
 │  └─────────────────────────────────────────────┘ │
 │                                                   │
 │  ChromaDB · MySQL · BGE-M3 · BGE-Reranker        │
 └──────────────────────────────────────────────────┘
 ```
+
+> **注：精排（Cross-Encoder）已实现、未启用。** `app/rag/reranker.py` 里的
+> `get_reranker()` 已是进程内单例，但查询链路（`hybrid_search`）**不调用**它 ——
+> CPU 上精排 10 个候选约需 1~3 秒，会顶掉「首 token < 800ms」的验收目标。
+> 接入与检索指标（Hit Rate / NDCG）一起留到 P1。
 
 ## 目录结构
 
@@ -107,7 +112,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-首次启动会自动创建 MySQL 表。Embedding 和 Reranker 模型首次使用时会自动下载（需网络）。
+首次启动会自动创建 MySQL 表，并在后台预热检索链路（BGE-M3 + Chroma + BM25），首个请求因此不必再付冷启动的代价。Embedding 模型首次预热时需联网下载；Reranker 模型在 P1 接入前不会被加载。如需跳过启动预热（例如测试），设 `PRELOAD_MODELS=false`。
 
 ### 3. 前端
 
@@ -142,7 +147,8 @@ docker compose up --build
 
 - **Agentic RAG**：LangGraph 驱动的多步自主决策，非一次性检索
 - **MCP 协议**：标准化工具接口，Agent 与工具解耦
-- **混合检索 + 精排**：BM25 关键词 + BGE-M3 语义 + RRF 融合 + Cross-Encoder
+- **混合检索**：BM25 关键词 + BGE-M3 语义，RRF 融合两路各 10 个候选
+- **精排（已实现、未启用）**：Cross-Encoder（BAAI/bge-reranker-v2-m3）已封装为进程内单例，P1 接入并附检索指标（Hit Rate / NDCG）
 - **本地 Embedding**：BGE-M3 完全本地运行，零 API 成本
 - **SSE 流式输出**：实时推送，逐 token 显示
 - **评估体系**：RAG 质量可量化、可追踪

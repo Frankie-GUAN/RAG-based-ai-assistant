@@ -1,6 +1,6 @@
 from app.rag.loader import load_file, split_documents
 from app.rag.vector_store import add_documents
-from app.rag.bm25_index import BM25Index
+from app.rag.bm25_index import get_bm25_index
 from app.tools.registry import tool_registry
 
 
@@ -18,12 +18,7 @@ def parse_document(file_path: str) -> str:
     add_documents(chunks)
 
     # Update BM25 index
-    bm25 = BM25Index()
-    bm25.load()
-    all_docs = list(bm25._documents) if bm25._documents else []
-    all_docs.extend(chunks)
-    bm25.build(all_docs)
-    bm25.save()
+    get_bm25_index().add(chunks)
 
     return f"成功解析文档 {path.name}，共生成 {len(chunks)} 个片段"
 

@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.models.document import Document as DocumentModel
 from app.rag.loader import save_uploaded_file, load_file, split_documents
-from app.rag.vector_store import add_documents, load_vectorstore, has_persisted_index
-from app.rag.bm25_index import BM25Index
+from app.rag.vector_store import add_documents
+from app.rag.bm25_index import get_bm25_index
 
 
 def process_document(db: Session, filename: str, content: bytes) -> DocumentModel:
@@ -14,16 +14,9 @@ def process_document(db: Session, filename: str, content: bytes) -> DocumentMode
     documents = load_file(file_path)
     chunks = split_documents(documents)
 
-    vectorstore = add_documents(chunks)
+    add_documents(chunks)
 
-    bm25 = BM25Index()
-    if bm25.load():
-        all_docs = list(bm25._documents)
-    else:
-        all_docs = []
-    all_docs.extend(chunks)
-    bm25.build(all_docs)
-    bm25.save()
+    get_bm25_index().add(chunks)
 
     doc_record = DocumentModel(
         filename=filename,

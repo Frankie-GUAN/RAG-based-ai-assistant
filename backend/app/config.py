@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
+    # 启动时预载检索链路（embeddings + Chroma + BM25）。
+    # 测试里若用 `with TestClient(app)` 会触发 lifespan，设 PRELOAD_MODELS=false 跳过。
+    preload_models: bool = True
+
     # History compression
     history_window_size: int = 10
 

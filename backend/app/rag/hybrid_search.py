@@ -7,9 +7,11 @@ from app.rag.bm25_index import BM25Index
 from app.rag.vector_store import get_retriever
 
 
-def _vector_search(query: str, top_k: int = 10) -> List[Tuple[Document, float]]:
-    retriever = get_retriever()
+def _vector_search(query: str, top_k: int) -> List[Tuple[Document, float]]:
+    retriever = get_retriever(top_k)          # ← 此前这个 k 被忽略
     docs = retriever.invoke(query)
+    # 这里是名次占位分，不是相似度。RRF 只用名次，故不影响融合结果，
+    # 但不要把它当相关度读。
     return [(doc, 1.0 - i * 0.05) for i, doc in enumerate(docs)][:top_k]
 
 
@@ -39,10 +41,15 @@ def _rrf_fuse(
 def hybrid_search(
     query: str,
     bm25_index: BM25Index,
-    vector_top_k: int = 10,
-    bm25_top_k: int = 10,
-    final_top_k: int = 10,
+    vector_top_k: int | None = None,
+    bm25_top_k: int | None = None,
+    final_top_k: int | None = None,
 ) -> List[Tuple[Document, float]]:
+    """两路各召回 hybrid_top_k 个候选，RRF 融合后返回 top_k 个。"""
+    vector_top_k = vector_top_k or settings.hybrid_top_k
+    bm25_top_k = bm25_top_k or settings.hybrid_top_k
+    final_top_k = final_top_k or settings.top_k
+
     vector_results = _vector_search(query, top_k=vector_top_k)
     bm25_results = bm25_index.search(query, top_k=bm25_top_k)
     return _rrf_fuse(vector_results, bm25_results, top_k=final_top_k)
