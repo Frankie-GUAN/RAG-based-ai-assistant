@@ -29,19 +29,33 @@ def sample_documents():
 def sqlite_session():
     """独立的内存 SQLite 会话。
 
-    用于验证依赖 ORM 配置（而非 MySQL 具体行为）的逻辑。只有 SQLite 内存库能让这类
-    测试进 CI —— 仓库其余测试分别依赖真实 MySQL、真实 API key、2GB 模型。
+    用于验证依赖 ORM 配置（而非 MySQL 具体行为）的逻辑，让这类测试在本地裸跑
+    `pytest` 时就有覆盖（仓库没有 CI；其余测试分别依赖真实 MySQL、真实 API key、
+    2GB 模型）。
+
+    两个必须讲清楚的坑：
+
+    · `:memory:` 默认走 SingletonThreadPool，**每个线程一个连接、也就是一个独立的空库**。
+      摘要路径经 `loop.run_in_executor` 跑在工作线程里（Task 9 要用这个 fixture 测它），
+      所以必须换 StaticPool 并放开 check_same_thread，否则工作线程看到的是一个没有表的库。
+    · `Base.metadata` 是**进程级**的：不显式给 tables，建出来的表取决于那一刻导入了哪些
+      模型 —— 单独跑是 conversations+messages，一旦 `app.main` 被导入就变成四张表。
+      显式列出这两张，schema 才不会随收集顺序漂移。
     """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
 
     from app.db.base import Base
+    from app.models.conversation import Conversation
+    from app.models.message import Message
 
-    import app.models.conversation  # noqa: F401
-    import app.models.message       # noqa: F401
-
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine, tables=[Conversation.__table__, Message.__table__])
     session = sessionmaker(bind=engine)()
     try:
         yield session

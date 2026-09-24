@@ -49,7 +49,7 @@ def list_conversations(db: Session) -> list[dict]:
         )
         .outerjoin(Message, Message.conversation_id == Conversation.id)
         .group_by(Conversation.id)
-        .order_by(desc(Conversation.updated_at))
+        .order_by(desc(Conversation.updated_at), desc(Conversation.id))
     ).all()
 
     # Batch-fetch last message previews
@@ -81,7 +81,7 @@ def get_conversation_with_context(db: Session, conversation_id: int) -> dict:
     if not conv:
         raise ValueError(f"Conversation {conversation_id} not found")
 
-    messages = conv.messages  # ordered by created_at via relationship
+    messages = conv.messages  # 按 Message.id 排序，见 Conversation.messages 的 order_by
 
     # Compression check
     if len(messages) > settings.history_window_size:

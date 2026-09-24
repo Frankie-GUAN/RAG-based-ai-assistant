@@ -31,4 +31,10 @@ def process_document(db: Session, filename: str, content: bytes) -> DocumentMode
 
 
 def list_documents(db: Session) -> List[DocumentModel]:
-    return db.query(DocumentModel).order_by(DocumentModel.created_at.desc()).all()
+    # 补 id 作次级键：created_at 是秒精度，同一秒上传的多份文档排序不稳定，
+    # 列表顺序会在每次刷新之间抖动
+    return (
+        db.query(DocumentModel)
+        .order_by(DocumentModel.created_at.desc(), DocumentModel.id.desc())
+        .all()
+    )

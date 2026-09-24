@@ -59,3 +59,24 @@ def test_ordering_survives_identical_timestamps(sqlite_session):
     reloaded = session.get(Conversation, conv.id)
 
     assert [m.role for m in reloaded.messages] == ["user", "assistant"]
+
+
+def test_ordering_pins_insertion_order_against_any_timestamp_direction(sqlite_session):
+    """上一条能区分「按 id」与「按 created_at 升序」，但**挡不住降序** ——
+    `order_by="Message.created_at.desc()"` 排出来同样是 ['user','assistant']，照样通过。
+
+    把插入顺序与时间戳交错（t+10 → t+0 → t+5），升序、降序、按 id 三种排法就彻底分开：
+    只有「按插入顺序」这一种解释能让断言成立。
+    """
+    session = sqlite_session
+    conv = _conversation(session)
+
+    base = datetime(2026, 9, 23, 10, 0, 0)
+    _add(session, conv.id, "user", "第一问", base + timedelta(seconds=10))
+    _add(session, conv.id, "assistant", "第一答", base)
+    _add(session, conv.id, "user", "第二问", base + timedelta(seconds=5))
+
+    session.expire_all()
+    reloaded = session.get(Conversation, conv.id)
+
+    assert [m.content for m in reloaded.messages] == ["第一问", "第一答", "第二问"]
