@@ -2203,6 +2203,8 @@ undecidable 'Error executing tool X'."
 - Create: `backend/tests/test_agent_core.py`
 - Modify: `backend/app/services/chat_service.py`
 - Modify: `backend/app/services/evaluation_service.py`（Step 9 —— 它 import 了将被删除的 `agent_graph`，不改就 ImportError）
+- Modify: `backend/app/api/evaluation.py`（Step 9 —— `run_evaluation` 转异步后要 `await`，并去掉已成死参数的 `has_docs`）
+- Modify: `frontend/src/composables/useEvaluation.ts`（Step 9 —— 同步去掉请求体里的 `has_docs`）
 - Modify: `backend/app/main.py`（Step 10 —— 挂载 MCP 工具客户端）
 - Delete: `backend/app/agent/graph.py`, `backend/app/agent/nodes.py`
 - Delete: `backend/tests/test_agent.py`（Step 8 —— 直接调 `agent_graph.invoke`，且需真实 DeepSeek key）
@@ -2935,7 +2937,7 @@ Expected: `app imports ok`
 - [ ] **Step 12: Commit**
 
 ```bash
-git add -A backend/app backend/tests
+git add -A backend/app backend/tests frontend/src/composables/useEvaluation.ts
 git commit -m "feat: replace the 3-node DAG with a real ReAct loop
 
 graph.py was router -> retrieve -> generate with a fixed topology; the
@@ -3576,8 +3578,9 @@ Task 7 Step 9 已把评测改成真异步（`ainvoke` + `asyncio.sleep`）。本
 **Files:**
 - Modify: `backend/app/models/evaluation.py`
 - Modify: `backend/app/api/evaluation.py`
-- Modify: `frontend/src/composables/useEvaluation.ts`
 - Create: `backend/tests/test_eval_nonblocking.py`
+
+> 注意：`frontend/src/composables/useEvaluation.ts` **不在这里** —— 它已随 Task 7 Step 9 一起改掉了（`has_docs` 的移除在两处是同一件事，Task 7 重写 `api/evaluation.py` 时必然碰到）。本任务只做确认，见 Step 2。
 
 - [ ] **Step 1: 移除死列与 Gemini 迁移残留**
 
@@ -3601,11 +3604,20 @@ Task 7 Step 9 已把评测改成真异步（`ainvoke` + `asyncio.sleep`）。本
 
 （MySQL root 密码硬编码默认值 `ragagent123` 属 backlog，本轮不动。）
 
-- [ ] **Step 2: 从 `EvalRequest` 与前端移除 `has_docs`**
+- [ ] **Step 2: 确认 `has_docs` 已移除（Task 7 Step 9 已完成）**
 
-`backend/app/api/evaluation.py` 的 `EvalRequest` 去掉 `has_docs: bool = False`；`frontend/src/composables/useEvaluation.ts` 的请求体同步去掉该字段。
+这一步**原本归本任务**，但 Task 7 Step 9 重写 `api/evaluation.py` 时必然会碰到 `EvalRequest`，所以那两处（`EvalRequest` 字段、前端 `useEvaluation.ts` 的请求体）**已随 Task 7 落地**，本任务不再重复改。此处只做确认：
 
-理由：工具可用性由 MCP client 的 specs 决定、路由由模型决定，客户端传 `has_docs` 已不产生任何效果。留着它就是留一个「参数名与行为不符」的东西 —— 正是本计划要消灭的那类问题。
+```bash
+cd ..
+grep -rn "has_docs" backend/app/api/evaluation.py frontend/src/composables/useEvaluation.ts || echo "已清理"
+```
+
+Expected: `已清理`
+
+（注意 `backend/app/api/chat.py` 的 `ChatRequest.has_docs` 不在此列 —— 那条路径仍在用，Task 8 保留了它。不要顺手删。）
+
+理由：工具可用性由 MCP client 的 specs 决定、路由由模型决定，客户端传 `has_docs` 已不产生任何效果。
 
 - [ ] **Step 3: 写回归测试 `backend/tests/test_eval_nonblocking.py`**
 
@@ -3712,7 +3724,7 @@ Expected: health 在几十毫秒内返回，且**不随评测进行而变慢**�
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/api/evaluation.py backend/app/models/evaluation.py frontend/src/composables/useEvaluation.ts backend/tests/test_eval_nonblocking.py
+git add backend/app/api/evaluation.py backend/app/models/evaluation.py backend/tests/test_eval_nonblocking.py
 git commit -m "test: lock in that evaluation no longer blocks the event loop
 
 Adds a regression test that fails if run_evaluation is awaited
