@@ -1087,7 +1087,15 @@ was wrong for the same reason."
 - Create: `backend/tests/test_protocol.py`
 - Modify: `backend/tests/conftest.py`
 
-- [ ] **Step 1: 在 `backend/tests/conftest.py` 追加 anyio fixture**
+> **本任务已交付（2026-09-24）。三处规范缺陷已就地修正 —— 实现是逐字照抄的，问题在规范本身。**
+>
+> 1. **那条守卫测试是重言式，抓不住它声称要抓的东西。** 原 Step 2 里 `declared` 集合是写在测试函数内的五个类属性**硬编码字面量**，从不检视模块 —— 它只是比较两个硬编码集合。实测：定义第六种子类、两处都不同步，**测试静默通过**。已改为遍历 `AgentEvent.__subclasses__()`，并断言 `==` 而非 `<=`（后端多了未登记类型、前端留了已删类型，两个方向都会失败）。
+> 2. **基类 `AgentEvent` 可实例化**，于是 `AgentEvent().to_dict()` 会产出 `{"type": "event"}` —— 又一个「可序列化但无生产者」的类型，正是本模块存在的理由要排除的那类东西。已在 `__post_init__` 里禁止直接实例化（子类不受影响）。补上这条之后，「无生产者类型」这个原则才第一次有了机械护栏 —— 此前它完全靠评审自觉。
+> 3. **Step 1 的 anyio fixture 作用域错了，给出的理由也错了。** 原文写「pytest 的 anyio 插件要求此 fixture」—— 插件**自己就提供**这个 fixture（参数取自 `get_available_backends()`），而本环境未装 trio，所以这层覆盖在今天是**行为中性**的。真正的问题是原文把它声明为 **function** 作用域，而插件原版是 **module** —— 后果是任何 **module 作用域的 fixture 依赖它都会在收集期抛 `ScopeMismatch`**（评审复现了完整堆栈），依赖插件原版则正常。Task 7 很可能会写那种 fixture，等于用一点小便利换掉了作用域可组合性。已改为 `scope="module"`，并验证了「module 作用域 fixture 能依赖它」与「async 测试仍跑在 asyncio 上」。
+>
+> 另外：`protocol.py` 与测试注释都写着契约要与 `frontend/src/composables/useChat.ts` 的事件分发保持同步，但该文件目前仍是旧的 `content`/`done` 行协议、没有这五种事件的分发 —— 已在注释里标明那是 Task 8 的工作。
+
+- [x] **Step 1: 在 `backend/tests/conftest.py` 追加 anyio fixture**
 
 在文件**末尾**追加（保留已有的 `sample_documents` fixture 不动）：
 
@@ -1098,7 +1106,7 @@ def anyio_backend():
     return "asyncio"
 ```
 
-- [ ] **Step 2: 写失败的测试 `backend/tests/test_protocol.py`**
+- [x] **Step 2: 写失败的测试 `backend/tests/test_protocol.py`**
 
 ```python
 import json
@@ -1184,7 +1192,7 @@ def test_to_sse_data_is_single_line():
     assert "\n" not in frame["data"]
 ```
 
-- [ ] **Step 3: 运行测试，确认失败**
+- [x] **Step 3: 运行测试，确认失败**
 
 ```bash
 cd backend
@@ -1193,7 +1201,7 @@ cd backend
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.agent.protocol'`
 
-- [ ] **Step 4: 实现 `backend/app/agent/protocol.py`**
+- [x] **Step 4: 实现 `backend/app/agent/protocol.py`**
 
 ```python
 """Agent 事件协议（Python 端）。
@@ -1269,7 +1277,7 @@ def to_sse(event: AgentEvent) -> dict[str, str]:
     return {"event": event.type, "data": json.dumps(event.to_dict(), ensure_ascii=False, default=str)}
 ```
 
-- [ ] **Step 5: 运行测试，确认通过**
+- [x] **Step 5: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -1278,7 +1286,7 @@ cd backend
 
 Expected: 8 passed
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/agent/protocol.py backend/tests/test_protocol.py backend/tests/conftest.py
