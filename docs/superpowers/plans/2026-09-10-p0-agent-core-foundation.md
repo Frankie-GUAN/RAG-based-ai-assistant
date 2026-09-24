@@ -1094,6 +1094,8 @@ was wrong for the same reason."
 > 3. **Step 1 的 anyio fixture 作用域错了，给出的理由也错了。** 原文写「pytest 的 anyio 插件要求此 fixture」—— 插件**自己就提供**这个 fixture（参数取自 `get_available_backends()`），而本环境未装 trio，所以这层覆盖在今天是**行为中性**的。真正的问题是原文把它声明为 **function** 作用域，而插件原版是 **module** —— 后果是任何 **module 作用域的 fixture 依赖它都会在收集期抛 `ScopeMismatch`**（评审复现了完整堆栈），依赖插件原版则正常。Task 7 很可能会写那种 fixture，等于用一点小便利换掉了作用域可组合性。已改为 `scope="module"`，并验证了「module 作用域 fixture 能依赖它」与「async 测试仍跑在 asyncio 上」。
 >
 > 另外：`protocol.py` 与测试注释都写着契约要与 `frontend/src/composables/useChat.ts` 的事件分发保持同步，但该文件目前仍是旧的 `content`/`done` 行协议、没有这五种事件的分发 —— 已在注释里标明那是 Task 8 的工作。
+>
+> **守卫测试后续又加固了一轮**（第一轮评审提出的三条）：改为**递归**遍历后代（只遍历直接子类时 `class GrandChild(TokenEvent)` 会隐形，实测加一个孙类后直接遍历仍看到 5 种、判定「通过」）；失败信息把 type 映射到 `模块.类名`（`__subclasses__()` 是进程级的，别的测试模块里定义子类也会进来，不给出处的话报错会落在 `test_protocol.py` 上、看起来像契约变了）；并单独断言 `type` 无重复（集合语义会吞掉重复项）。若按原样重建这个任务，得到的是加固前那版。
 
 - [x] **Step 1: 在 `backend/tests/conftest.py` 追加 anyio fixture**
 
@@ -1309,7 +1311,18 @@ README claims this work exists to remove."
 - Create: `backend/tests/test_context_engine.py`
 - Modify: `backend/app/config.py`
 
-- [ ] **Step 1: 在 `backend/app/config.py` 的 `Settings` 类中追加配置**
+> **本任务已交付（2026-09-24）。两处规范缺陷已就地修正 —— 照抄下面的代码块会得到一份「跑不过自己的测试」的实现。**
+>
+> 1. **Step 2 的 `test_counter_is_monotonic_and_positive` 跑不起来**：它引用了 `counter` 却没在签名里声明该 fixture。注意报错不是 `NameError`，而是 `AttributeError: 'FixtureFunctionDefinition' object has no attribute 'count'` —— pytest 会把 fixture 对象注入模块命名空间，裸写 `counter` 拿到的是 fixture 定义本身。修法是加上 `(counter)`。
+> 2. **Step 5 的 `_fit_text` 违反了自己的不变量**：硬截断分支把 `_TRUNCATION_NOTE` 拼上去却**没把提示本身算进预算**，于是「截断后」的用量反超该层预算 —— 实测 358 > 350，而 Step 2 的 `assert used <= budget` 正是断言这一点（Step 7 声称的「10 passed」因此不成立，实为 2 failed, 8 passed）。修法：从可用额度里先扣掉提示的 token 数，再按**实测**计数收缩。新的语义后果：若剩余额度连提示本身都装不下，该条**整个丢弃**而不是超预算输出。
+> 3. **三条测试是空的**（评审用两个故意写错的引擎验证）：`test_retrieved_layer_keeps_highest_ranked_first` 的 50 条短片段加起来没到预算、根本没发生截断，`TailKeepingEngine`（从尾部保留）能全过；`test_empty_layers_are_omitted_from_messages` 只断言 `"None" not in contents`，`EmptyHeaderEngine`（无条件输出层标题）能全过；`test_summary_is_truncated_to_configured_char_limit` 从没检查过字数上限（`context_summary_max_chars` 是生成侧约束，由 Task 9 消费，引擎里没有这个参数）。三条都已强化。
+> 4. **收缩循环依赖一个没写下来的前提**：`count()` 在缩短时不应变贵。`TokenCounter` 协议原先没声明它，评审用一个非单调计数器实测出最高 28 token 越界。已在协议里写明，并在引擎里加兜底分支（收缩到 1 字符仍不合规就丢弃该条）。
+>
+> **⚠️ 给 Task 7 的警告：`ContextResult` 不是 prompt 的硬性 token 上界。** 引擎约束的是**每层自己的 `used`**，而 `question` 不过计数器、层标题与分隔符都不计，五层比例之和又恰好是 1.00 —— 各层填满时最终 prompt 会**超过** `ContextBudget.total_tokens`。ReAct 循环每轮都重入 `build`，不能把它当预算保证。该说明已写在 `ContextResult` 的 docstring 上。
+>
+> 另有一处遗留的不一致（未修，不影响行为）：history 层的 `source_count` 是 `len(history)`，会数进空内容消息，而 `_fit_text` 各层用的是 `len([i for i in items if i])`。
+
+- [x] **Step 1: 在 `backend/app/config.py` 的 `Settings` 类中追加配置**
 
 插入到 `reranker_model` 之后、`history_window_size` 之前：
 
@@ -1324,7 +1337,7 @@ README claims this work exists to remove."
     context_summary_max_chars: int = 2_000
 ```
 
-- [ ] **Step 2: 写失败的测试 `backend/tests/test_context_engine.py`**
+- [x] **Step 2: 写失败的测试 `backend/tests/test_context_engine.py`**
 
 ```python
 import pytest
@@ -1431,7 +1444,7 @@ def test_empty_layers_are_omitted_from_messages(engine):
     assert "None" not in contents
 ```
 
-- [ ] **Step 3: 运行测试，确认失败**
+- [x] **Step 3: 运行测试，确认失败**
 
 ```bash
 cd backend
@@ -1440,7 +1453,7 @@ cd backend
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.context'`
 
-- [ ] **Step 4: 实现 `backend/app/context/tokens.py`**
+- [x] **Step 4: 实现 `backend/app/context/tokens.py`**
 
 ```python
 """可替换的 token 计数。
@@ -1482,7 +1495,7 @@ class HeuristicTokenCounter:
         return max(1, math.ceil(cjk / 1.5 + other / 4))
 ```
 
-- [ ] **Step 5: 实现 `backend/app/context/engine.py`**
+- [x] **Step 5: 实现 `backend/app/context/engine.py`**
 
 ```python
 """上下文工程引擎：分层 token 预算 + 消息拼装。
@@ -1664,7 +1677,7 @@ class ContextEngine:
         return list(reversed(kept_reversed))
 ```
 
-- [ ] **Step 6: 实现 `backend/app/context/__init__.py`**
+- [x] **Step 6: 实现 `backend/app/context/__init__.py`**
 
 ```python
 from app.context.engine import ContextBudget, ContextEngine, ContextResult, LayerStat
@@ -1680,7 +1693,7 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 7: 运行测试，确认通过**
+- [x] **Step 7: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -1689,7 +1702,7 @@ cd backend
 
 Expected: 10 passed
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/app/context/ backend/app/config.py backend/tests/test_context_engine.py
