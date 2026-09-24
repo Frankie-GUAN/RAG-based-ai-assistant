@@ -71,20 +71,39 @@ def test_each_layer_respects_its_budget(engine):
 
 
 def test_retrieved_layer_keeps_highest_ranked_first(engine):
-    """传入顺序即相关度顺序（reranker 已排好），截断必须从头保留。"""
-    retrieved = [f"排名第{i}的片段" for i in range(50)]
+    """传入顺序即相关度顺序（reranker 已排好），截断必须从头保留。
+
+    条目刻意长到**单条就撑爆该层**（retrieved 预算 = 1000 × 0.35 = 350 token）。
+    原先用 50 条短片段时加起来还不到预算，`truncated` 是 False、50 条全保留 ——
+    断言对任何实现都成立，连「反向保留（从尾巴开始留）」这种 bug 都抓不住。
+    """
+    retrieved = [f"排名第{i}的片段" + "填充" * 200 for i in range(50)]
 
     result = engine.build(system="sys", question="q", retrieved=retrieved)
 
+    stat = next(s for s in result.stats if s.name == "retrieved")
+    assert stat.truncated is True
+    # 只断言「确实截断了」，不写死保留几条 —— 那取决于每条的实际 token 数与预算的
+    # 整除关系，写死会随 tokenizer 或预算调整而碎
+    assert stat.kept_count < stat.source_count, "必须真的截断，否则下面的断言对任何实现都成立"
+
     joined = "\n".join(m.content for m in result.messages)
     assert "排名第0的片段" in joined
+    assert "排名第49的片段" not in joined, "反向保留（从尾巴开始留）的实现会在这里失败"
 
 
-def test_summary_is_truncated_to_configured_char_limit(engine):
+def test_oversized_summary_is_truncated_within_the_memory_budget(engine):
+    """摘要（memory 层）超预算时被截断，且用量不越界。
+
+    注意用例名不再叫「char_limit」：`context_summary_max_chars` 是**生成侧**的字数
+    约束，由 Task 9 的滚动摘要消费，本引擎没有这个参数。这里断言的是引擎侧的 token
+    预算截断，不是字数上限。
+    """
     result = engine.build(system="sys", question="q", summary="摘要内容" * 5_000)
 
     memory_stat = next(s for s in result.stats if s.name == "memory")
     assert memory_stat.truncated is True
+    assert memory_stat.used <= memory_stat.budget
 
 
 def test_stats_cover_every_layer(engine):
@@ -96,7 +115,14 @@ def test_stats_cover_every_layer(engine):
 
 
 def test_empty_layers_are_omitted_from_messages(engine):
+    """没传内容的层不该留下空标题，也不该混进 "None"。
+
+    只断言 "None" not in contents 的话，除非有人手滑 f-string 了 None，否则永远成立 ——
+    空层的【长期记忆】/【参考资料】标题照样会拼进 prompt，它抓不住。
+    """
     result = engine.build(system="sys", question="q")
 
     contents = "\n".join(m.content for m in result.messages)
     assert "None" not in contents
+    for header in ("【长期记忆】", "【参考资料】", "【已获取的中间结果】"):
+        assert header not in contents, f"{header} 层为空时不该出现标题"

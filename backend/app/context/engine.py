@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from app.context.tokens import TokenCounter
 
@@ -79,7 +79,7 @@ class ContextEngine:
         memory_text, stat = self._fit_text("memory", [summary] if summary else [], self._budget.memory_ratio)
         stats.append(stat)
 
-        kept_history = self._fit_messages("history", list(history), self._budget.history_ratio)
+        kept_history = self._fit_messages(list(history), self._budget.history_ratio)
         stats.append(
             LayerStat(
                 name="history",
@@ -172,7 +172,7 @@ class ContextEngine:
             truncated=truncated or len(kept) < len([i for i in items if i]),
         )
 
-    def _fit_messages(self, name: str, messages: list[BaseMessage], ratio: float) -> list[BaseMessage]:
+    def _fit_messages(self, messages: list[BaseMessage], ratio: float) -> list[BaseMessage]:
         """从最近的消息往前保留，直到预算耗尽（保留时间连续的一段）。"""
         budget = self._budget.layer_budget(ratio)
         kept_reversed: list[BaseMessage] = []
