@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
 
+    # 上下文工程：分层 token 预算
+    context_total_tokens: int = 32_000
+    context_system_ratio: float = 0.15
+    context_memory_ratio: float = 0.10
+    context_history_ratio: float = 0.20
+    context_retrieved_ratio: float = 0.35
+    context_scratchpad_ratio: float = 0.20
+    context_summary_max_chars: int = 2_000
+
     # 启动时预载检索链路（embeddings + Chroma + BM25）。
     # 测试里若用 `with TestClient(app)` 会触发 lifespan，设 PRELOAD_MODELS=false 跳过。
     preload_models: bool = True
