@@ -1,7 +1,9 @@
+import pytest
 from langchain_core.documents import Document
 from app.rag.reranker import Reranker
 
 
+@pytest.mark.requires_model
 def test_reranker_returns_top_k():
     reranker = Reranker()
     docs = [

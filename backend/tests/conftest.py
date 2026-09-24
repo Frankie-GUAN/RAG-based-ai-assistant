@@ -23,3 +23,28 @@ def sample_documents():
         Document(page_content="劳动者提前三十日书面通知用人单位可以解除劳动合同", metadata={"source": "labor_law.pdf"}),
         Document(page_content="FastAPI是现代Python Web框架支持异步处理", metadata={"source": "python.pdf"}),
     ]
+
+
+@pytest.fixture
+def sqlite_session():
+    """独立的内存 SQLite 会话。
+
+    用于验证依赖 ORM 配置（而非 MySQL 具体行为）的逻辑。只有 SQLite 内存库能让这类
+    测试进 CI —— 仓库其余测试分别依赖真实 MySQL、真实 API key、2GB 模型。
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.db.base import Base
+
+    import app.models.conversation  # noqa: F401
+    import app.models.message       # noqa: F401
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()

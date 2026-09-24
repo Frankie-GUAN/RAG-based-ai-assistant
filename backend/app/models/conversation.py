@@ -13,4 +13,6 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    messages = relationship("Message", back_populates="conversation", order_by="Message.created_at")
+    # 按自增 id 排序，不按 created_at：created_at 是秒精度，同一次问答的
+    # user/assistant 两条消息时间戳完全相同（实测确认），无法定序。
+    messages = relationship("Message", back_populates="conversation", order_by="Message.id")
