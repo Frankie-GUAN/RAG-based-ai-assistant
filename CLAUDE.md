@@ -48,7 +48,9 @@ Vue 3 单页应用 → FastAPI → LangGraph Agent → 混合检索 → ChromaDB
 
 ### 请求链路
 
-`app/api/chat.py` 的 `POST /api/chat/stream` → `app/services/chat_service.py` 的 `run_agent()` → `app/agent/graph.py`（导入时即编译为模块级单例 `agent_graph`）→ `app/tools/registry.py` → `app/rag/hybrid_search.py`。
+`app/api/chat.py` 的 `POST /api/chat/stream` → `app/services/chat_service.py` 的 `run_agent()` → `app/agent/graph.py`（导入时即编译为模块级单例 `agent_graph`）→ 工具层 → `app/rag/hybrid_search.py`。
+
+**但这条路现在断了，而且是有意断的。** 工具层正从「模块级 dict 注册表」迁到真 MCP：Task 6 已删除 `app/tools/registry.py` 与 `schemas.py`、新建 `app/mcp/`，而 `app/agent/nodes.py` 仍在 import 那个被删掉的 `tool_registry` —— 所以**当前 `app.main` 不可导入**。Task 7 删掉 `graph.py` / `nodes.py` 后恢复。
 
 图是固定拓扑：`router`（由 LLM 分类到 `web`/`rag`/`direct`）→ `retrieve` | `web_search` → `generate`。`AgentState.iteration` 会被 router 自增，但没有任何地方读取它 —— 这里没有循环。
 
@@ -94,17 +96,20 @@ GSAP 动画统一使用同一套写法：模块作用域的 `let ctx`，`onMount
 - `docs/superpowers/specs/2026-09-10-live-agent-platform-design.md` —— PRD/设计的事实来源（目标架构、协议、P0/P1/P2 计划）。
 - `docs/superpowers/plans/2026-09-10-p0-agent-core-foundation.md` —— 逐任务的实施计划，为 `superpowers:subagent-driven-development` 编写。
 
-该计划会**删除** `agent/graph.py`、`agent/nodes.py`、`tools/registry.py`、`tools/schemas.py`，并**新建**真正的 ReAct 循环（`agent/core.py`）、真正的 MCP 工具层（`app/mcp/`，`mcp==2.2.0`，同进程 `InMemoryTransport`）、分层上下文引擎（`app/context/`），以及与未来 TypeScript 端侧 runtime 共享的 `AgentEvent` 协议（`agent/protocol.py`）。目前只完成了 Task 1（清理依赖）—— `backend/requirements.txt` / `requirements-dev.txt` 的未提交改动就是这一步。计划里记录了几条已实测验证、但凭记忆很容易写错的硬事实（MCP 类是 `MCPServer` 而非 `FastMCP`；MCP 会向客户端隐藏工具异常细节，所以工具必须返回 `{ok, data, error}` 而不能抛异常）。
+该计划会**删除** `agent/graph.py`、`agent/nodes.py`、`tools/registry.py`、`tools/schemas.py`，并**新建**真正的 ReAct 循环（`agent/core.py`）、真正的 MCP 工具层（`app/mcp/`，`mcp==2.2.0`，同进程 `InMemoryTransport`）、分层上下文引擎（`app/context/`），以及前后端共享的 `AgentEvent` 协议（`agent/protocol.py`）。
+
+**进度以计划文档里的复选框为唯一事实来源**（Task 1–6 已完成，Task 7 起未开始）。计划里还记录了几条凭记忆很容易写错的硬事实（MCP 类是 `MCPServer` 而非 `FastMCP`；MCP 会向客户端隐藏工具异常细节，所以工具必须返回 `{ok, data, error}` 而不能抛异常）。**其中一条已被更正**：`structured_content` 的包装行为**取决于返回注解** —— `-> dict` 时它是 `None`（JSON 只在文本内容里），`-> dict[str, Any]` 时是那个 dict 本身，只有非 dict 注解才包成 `{"result": ...}`。原先那条「无条件被包在 `{"result": ...}` 里」的结论，是拿错误注解类型探测得出的。
+
+每个任务的正文里都有一张「本任务已交付」的更正表，列出「原始规范 vs 实际落地」的差异 —— 那些代码块是**原始规范，不要照抄**：照抄会重新引入已经修掉的 bug。
 
 ### README 与实现不符之处
 
 这些正是 P0 计划要消灭的「虚假宣称」—— 不要把 README 当作规格说明：
 
-- README 宣称使用 MCP 协议；但 `tools/registry.py` 只是一个普通 dict 加手写 schema，`app/` 里没有任何地方 import `mcp`。
 - README 宣称 SSE 流式输出；但 `chat.py` 会等完整答案生成后，再按 4 个字符切片并 `await asyncio.sleep(0.02)` 伪造成流式（`chat.py:75-78`）。
 - `docker-compose.yml` 给后端传的是 `GEMINI_API_KEY`，而 `config.py` 读的是 `DEEPSEEK_API_KEY` —— 用 Docker 部署会拿不到任何 LLM key。compose 也从未透传 `SERPAPI_KEY`，所以那里的联网搜索始终是关闭的。
 
-（README 关于 reranker 的那处宣称已由 Task 2 修正，不再是言行不符项。上面两条要等 Task 6 和 Task 8 落地后才消。）
+（README 关于 reranker 的那处宣称已由 Task 2 修正，关于 MCP 协议的那处已由 Task 6 修正 —— 工具层现在真的是 MCP。剩下这条 SSE 的宣称要等 Task 8 重写 `chat.py` 才消。）
 
 ## 约定
 

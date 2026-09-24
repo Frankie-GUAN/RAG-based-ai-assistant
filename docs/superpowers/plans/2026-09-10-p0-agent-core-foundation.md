@@ -31,7 +31,7 @@
 | `mcp` 版本 | **2.2.0**。高层类叫 `MCPServer`，**不是 `FastMCP`** |
 | 导入路径 | `from mcp.server import MCPServer`；`from mcp.client.session import ClientSession`；`from mcp.client._memory import InMemoryTransport` |
 | 字段命名 | mcp 2.x 全 snake_case：`input_schema` / `is_error` / `structured_content`。用 camelCase 会 `AttributeError` |
-| `structured_content` | 返回值被包在 `{"result": ...}` 里，需拆包 |
+| `structured_content` | **包装与否取决于返回注解**（2026-09-24 更正 —— 原先写的「返回值被包在 `{"result": ...}` 里，需拆包」是**过度概括**）：`-> dict` / 无注解 → **为 `None`**，JSON 只出现在文本内容里；`-> dict[str, Any]` → **就是那个 dict 本身，未包装**；只有 `-> str` / `list[...]` 这类**非 dict** 注解才包成 `{"result": ...}`。当初得出原结论的探测多半用的是 `-> str` |
 | **MCP 隐藏异常细节** | 工具抛异常时，客户端只拿到 `is_error=True` 与通用文案 `"Error executing tool X"`，真实异常仅在服务端日志。**因此工具必须返回 `{ok, data, error}` 而非抛异常** |
 | 同进程运行 | `InMemoryTransport` 可用。**不可用 stdio 子进程**——BGE-M3 约 2GB，子进程会再加载一份 |
 | 流式 + 工具调用 | `AIMessageChunk + AIMessageChunk` 能正确合并 `tool_call_chunks`。实测 `{"name":...,"args":""}` + `{"name":None,"args":"{\"query\":\"x\"}"}` → `tool_calls=[{'name':'search_documents','args':{'query':'x'},'id':'call_1'}]` |
@@ -1725,9 +1725,22 @@ git commit -m "feat: add layered context engineering engine with per-layer token
 - Modify: `backend/app/api/tools.py`
 - Delete: `backend/app/tools/registry.py`, `backend/app/tools/schemas.py`
 
+> **本任务已交付（2026-09-24）。三处规范缺陷已就地修正，另有若干交付时的更动 —— 照抄下面的 `client.py` 代码块会得到一个带着「哑错误」的客户端，也就是本任务本要消灭的那个 bug。**
+>
+> 1. **Step 11 的「Expected: 7 passed」不成立**（实为 2 failed, 5 passed），两个独立成因：
+>    - **前提表那条 `structured_content` 事实是过度概括**（已在表里更正）。对 `-> dict` 注解 mcp 不生成 output schema、`structured_content` 为 `None`；对 `-> dict[str, Any]` 它是 dict 本身。计划给的 `client.py` 只处理了 `{"result": ...}`，于是 `result.data` 是 `None`，`test_successful_call_unwraps_structured_content` 直接 `TypeError`。
+>    - **`client.py` 从不解析 `{ok, data, error}` 信封** —— 一个 `ok=False` 的工具回来是 `ToolResult(ok=True, data=None, error=None)`。**这正是本任务存在要消灭的哑错误**，而计划的代码把它原样交付了。已按下面第 3 条修正。
+> 2. **Step 12 的两个未知已实测确定**：`MCPServer.list_tools` 是 **async 且直接返回 `list[Tool]`**（不是 `ListToolsResult`），字段是 `input_schema`、**没有 `.parameters`**（上面已就地改）。
+> 3. **`client.py` 的落地版本比计划多了两件事**：`structured_content` 为 `None` 时从文本内容还原 JSON；识别信封并回填 `ok` / `error`（`data` 里保留完整信封，与计划自己的测试断言 `result.data["data"][0]["doc_id"]` 一致）。
+> 4. **信封的键集是线上契约，判别式是「失败开放」的**：`set(payload) == {"ok","data","error"}` 一旦因 `_envelope` 多出第四个键而失配，工具失败会被当成成功返回 —— 哑错误静默回归。因此 `_envelope` 的键集由一条用例从**两个分支**钉住（原先只有成功分支有断言）。
+> 5. **测试覆盖盲区已补**：原先所有用例的 stub 工具注解都是裸 `-> dict`，`structured_content` 为 `None`，跑的全是 `_json_from_text` 兜底 —— 一条生产永不走的路；真实服务器接线、三个工具包装器与 `asyncio.to_thread` 那一跳**零覆盖**。现补了「真实 mcp_server + 真实工具端到端」与「非 dict 注解走 `{"result": ...}` 拆包」两条。
+> 6. **`POST /api/tools/execute` 被删掉了**（计划 Step 12 的前提「若该文件只做列出可用工具」是假的，它还有这个执行接口）。**删除是对的**：它是无认证、无校验的 `name` + `kwargs` 执行原语，而 `parse_document` 会写 Chroma **和** BM25 索引 —— 也就是一个远程写原语；移植到 MCP 只会把这份暴露面保留下来。全仓 grep 确认无人引用（前端零引用，只有 2026-05-18 那份计划定义过它）。**另一处未记的更动**：路由由 `/api/tools/` 变为 `/api/tools`（Starlette 的 `redirect_slashes` 会兜住，客户端无感）。
+> 7. **Step 14 的提交信息有一处夸大**：它写「the agent is a real MCP client」，但在本任务结束时 `app/agent/nodes.py` 仍在调 `tool_registry`、`app.main` 仍不可导入（Task 7 才删 `nodes.py`）。同样的，Step 13 的标题说「验证应用可导入」，而它的脚本只 import `app.mcp.*` —— 应用级的可导入性要到 Task 7 才成立。
+> 8. **一条给 Task 7 的提醒**：`ToolResult.data` 里是**完整信封**，所以计划里 `_flatten(event.data)` 会把整个信封 `str()` 掉，而不是取出片段文本。这是计划原有的口径含糊，不是本任务引入的。
+
 > **提交前先核对待提交集合。** 本任务的 `git add` 用了 `-A`（为了记录上面两个删除），可能扫进工作区里与本任务无关的改动（`.claude/settings.local.json`、`frontend/package*.json`、`screenshots/` 长期以未提交状态存在）。提交前跑一次 `git status --short`，确认暂存的**只**是上表列出的文件。
 
-- [ ] **Step 1: 改写 `backend/app/tools/document_search.py`**
+- [x] **Step 1: 改写 `backend/app/tools/document_search.py`**
 
 返回结构化数据（不再拼字符串、不再注册 registry），供 Agent 与引用溯源使用：
 
@@ -1753,7 +1766,7 @@ def search_documents(query: str, top_k: int = 4) -> list[dict]:
     ]
 ```
 
-- [ ] **Step 2: 改写 `backend/app/tools/web_search.py`**
+- [x] **Step 2: 改写 `backend/app/tools/web_search.py`**
 
 ```python
 import os
@@ -1783,7 +1796,7 @@ def search_web(query: str, num: int = 5) -> list[dict]:
     ]
 ```
 
-- [ ] **Step 3: 改写 `backend/app/tools/document_parser.py`**
+- [x] **Step 3: 改写 `backend/app/tools/document_parser.py`**
 
 ```python
 from pathlib import Path
@@ -1806,7 +1819,7 @@ def parse_document(file_path: str) -> dict:
     return {"file": path.name, "chunks": len(chunks)}
 ```
 
-- [ ] **Step 4: 改写 `backend/app/tools/__init__.py`**
+- [x] **Step 4: 改写 `backend/app/tools/__init__.py`**
 
 ```python
 from app.tools import document_parser  # noqa: F401
@@ -1814,7 +1827,7 @@ from app.tools import document_search  # noqa: F401
 from app.tools import web_search  # noqa: F401
 ```
 
-- [ ] **Step 5: 删除被取代的文件**
+- [x] **Step 5: 删除被取代的文件**
 
 ```bash
 cd backend
@@ -1823,7 +1836,7 @@ git rm app/tools/registry.py app/tools/schemas.py
 
 **已知中间态：从本步到 Step 12 之间，应用无法导入。** `app/api/tools.py` 仍 import 被删掉的 `tool_registry`（Step 12 才改），`app/agent/nodes.py` 同样（Task 7 Step 8 才删）。这与 Task 1 Step 2 里记的是同一件事，Step 13 会验证最终可导入。若想每一步都保持可导入，可把 Step 12 提前到本步之前。
 
-- [ ] **Step 6: 写失败的测试 `backend/tests/test_mcp_tools.py`**
+- [x] **Step 6: 写失败的测试 `backend/tests/test_mcp_tools.py`**
 
 ```python
 import pytest
@@ -1920,7 +1933,7 @@ async def test_unknown_tool_returns_ok_false_instead_of_raising():
     assert result.error
 ```
 
-- [ ] **Step 7: 运行测试，确认失败**
+- [x] **Step 7: 运行测试，确认失败**
 
 ```bash
 cd backend
@@ -1929,7 +1942,7 @@ cd backend
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.mcp'`
 
-- [ ] **Step 8: 实现 `backend/app/mcp/server.py`**
+- [x] **Step 8: 实现 `backend/app/mcp/server.py`**
 
 ```python
 """MCP 工具服务端 —— 项目中工具定义的唯一来源。
@@ -1988,7 +2001,7 @@ async def parse_document(file_path: str) -> dict[str, Any]:
     return await asyncio.to_thread(_envelope, _parse_document, file_path)
 ```
 
-- [ ] **Step 9: 实现 `backend/app/mcp/client.py`**
+- [x] **Step 9: 实现 `backend/app/mcp/client.py`**
 
 ```python
 """MCP 客户端封装。
@@ -2087,7 +2100,7 @@ async def open_tool_client(server: MCPServer) -> AsyncIterator[MCPToolClient]:
             yield client
 ```
 
-- [ ] **Step 10: 实现 `backend/app/mcp/__init__.py`**
+- [x] **Step 10: 实现 `backend/app/mcp/__init__.py`**
 
 ```python
 from app.mcp.client import MCPToolClient, ToolResult, ToolSpec, open_tool_client
@@ -2096,7 +2109,7 @@ from app.mcp.server import mcp_server
 __all__ = ["MCPToolClient", "ToolResult", "ToolSpec", "open_tool_client", "mcp_server"]
 ```
 
-- [ ] **Step 11: 运行测试，确认通过**
+- [x] **Step 11: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -2108,7 +2121,7 @@ Expected: 7 passed
 若 `from mcp.client._memory import InMemoryTransport` 报错（该模块在下划线前缀的私有路径下，未来版本可能变动），
 替代方案是自行基于 `mcp.shared.memory.create_client_server_memory_streams()` 构造，见该函数源码。
 
-- [ ] **Step 12: 改写 `backend/app/api/tools.py` 以走 MCP**
+- [x] **Step 12: 改写 `backend/app/api/tools.py` 以走 MCP**
 
 先查看现有内容：
 
@@ -2134,7 +2147,7 @@ async def list_tools():
         {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.parameters,
+            "parameters": tool.input_schema,   # 实测：Tool 没有 .parameters 字段
         }
         for tool in await mcp_server.list_tools()
     ]
@@ -2144,7 +2157,7 @@ async def list_tools():
 `../.venv/Scripts/python.exe -c "from mcp.server import MCPServer; print([m for m in dir(MCPServer) if 'tool' in m.lower()])"`
 确认；若签名不同，以实际为准并同步更新本步骤。
 
-- [ ] **Step 13: 验证应用可导入且工具能列出**
+- [x] **Step 13: 验证应用可导入且工具能列出**
 
 ```bash
 cd backend
@@ -2164,7 +2177,7 @@ anyio.run(main)
 
 Expected: 打印 `search_documents` / `search_web` / `parse_document` 三行
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add -A backend/app/tools backend/app/mcp backend/app/api/tools.py backend/tests/test_mcp_tools.py
