@@ -29,7 +29,14 @@ mcp_server = MCPServer(
 
 
 def _envelope(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> dict[str, Any]:
-    """把「抛异常」的同步函数转成结构化结果。"""
+    """把「抛异常」的同步函数转成结构化结果。
+
+    **键集 `{"ok", "data", "error"}` 是线上契约，不要增删。** 客户端靠
+    `set(payload) == {"ok", "data", "error"}` 判断拿到的是不是信封，而这个判别式是
+    **失败开放**的：多一个键就不再命中，工具失败会被当成正常成功返回 —— 正是本模块
+    要消灭的那种哑错误。tests/test_mcp_tools.py 有一条用例把这个键集钉住，
+    改动会在这里响亮地失败，而不是在生产里静默降级。
+    """
     try:
         return {"ok": True, "data": fn(*args, **kwargs), "error": None}
     except Exception as exc:  # noqa: BLE001 — 工具边界必须兜住一切

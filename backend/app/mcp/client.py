@@ -63,7 +63,10 @@ class MCPToolClient:
 
         try:
             result = await self._session.call_tool(name, arguments)
-        except Exception as exc:  # noqa: BLE001 — 传输层错误（工具名不存在等）
+        except Exception as exc:  # noqa: BLE001 — 传输层自身出错（连接 / 协议层）
+            # 注意这里**不是**「工具名不存在」那条路：未知工具走的是 is_error=True 与
+            # "Unknown tool: X"，由下面那条分支返回（InMemoryTransport 的
+            # raise_exceptions 默认 False）。实测本分支未被触发过。
             return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}", ms=_elapsed_ms(started))
 
         ms = _elapsed_ms(started)
