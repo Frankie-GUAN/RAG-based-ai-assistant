@@ -70,7 +70,8 @@ def anyio_backend():
 
     作用域必须与 anyio 插件自带的 fixture 一致（module）。插件把它声明为 module
     作用域，若这里覆盖成 function，那么**任何 module 作用域的 fixture 依赖它都会在
-    收集期抛 ScopeMismatch**（Task 7 很可能会写那种 fixture），而依赖插件原版则正常 ——
+    setup 期抛 ScopeMismatch**（pytest 把这类错误报成 ERROR at setup，收集本身不中断；
+    Task 7 很可能会写那种 fixture），而依赖插件原版则正常 ——
     等于用一个「固定后端」的小便利换掉了 module 作用域的可组合性。
 
     另外要清楚：插件本身已提供这个 fixture，参数取自 get_available_backends()。
