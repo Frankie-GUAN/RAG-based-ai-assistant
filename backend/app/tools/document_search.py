@@ -1,18 +1,19 @@
-from app.rag.hybrid_search import hybrid_search
 from app.rag.bm25_index import get_bm25_index
-from app.tools.registry import tool_registry
+from app.rag.hybrid_search import hybrid_search
 
 
-def search_documents(query: str, top_k: int = 4) -> str:
+def search_documents(query: str, top_k: int = 4) -> list[dict]:
+    """混合检索私有文档库，返回结构化片段列表（相关度降序）。"""
+    # 必须用共享单例：此处若写 BM25Index()，每次检索都会重建索引并重读 pickle，
+    # 把 Task 2 对 BM25 的修复整体作废。
     results = hybrid_search(query, get_bm25_index(), final_top_k=top_k)
-    if not results:
-        return "未找到相关文档"
 
-    lines = []
-    for i, (doc, score) in enumerate(results, 1):
-        source = doc.metadata.get("source", "未知")
-        lines.append(f"[{i}] (相关度: {score:.2f}) 来源: {source}\n{doc.page_content[:500]}")
-    return "\n\n".join(lines)
-
-
-tool_registry.register("search_documents", search_documents)
+    return [
+        {
+            "doc_id": f"{doc.metadata.get('source', 'unknown')}#{i}",
+            "content": doc.page_content,
+            "source": doc.metadata.get("source", "未知"),
+            "score": round(float(score), 4),
+        }
+        for i, (doc, score) in enumerate(results)
+    ]
