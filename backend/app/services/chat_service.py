@@ -1,30 +1,55 @@
-from langchain_core.messages import HumanMessage, AIMessage
-from app.agent.graph import agent_graph
-from app.agent.state import AgentState
+"""对话服务：把会话历史交给 Agent Core，产出事件流。"""
+from __future__ import annotations
+
+from typing import AsyncIterator
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+
+from app.agent.core import AgentDeps, AgentTask, run_agent_stream
+from app.agent.llm import get_chat_model
+from app.agent.protocol import AgentEvent
+from app.context.engine import ContextBudget, ContextEngine
+from app.context.tokens import HeuristicTokenCounter
+from app.config import settings
+from app.mcp.client import MCPToolClient
 
 
-def run_agent(question: str, history: list[dict], has_docs: bool, summary: str | None = None) -> dict:
-    lc_messages = []
-    for m in history:
-        if m["role"] == "user":
-            lc_messages.append(HumanMessage(content=m["content"]))
+def build_context_engine() -> ContextEngine:
+    return ContextEngine(
+        budget=ContextBudget.from_settings(settings),
+        counter=HeuristicTokenCounter(),
+    )
+
+
+def to_langchain_messages(history: list[dict]) -> list[BaseMessage]:
+    messages: list[BaseMessage] = []
+    for item in history:
+        if item["role"] == "user":
+            messages.append(HumanMessage(content=item["content"]))
         else:
-            lc_messages.append(AIMessage(content=m["content"]))
-    lc_messages.append(HumanMessage(content=question))
+            messages.append(AIMessage(content=item["content"]))
+    return messages
 
-    initial_state: AgentState = {
-        "messages": lc_messages,
-        "question": question,
-        "has_docs": has_docs,
-        "route": "",
-        "context": "",
-        "iteration": 0,
-        "final_answer": "",
-        "summary": summary or "",
-    }
-    result = agent_graph.invoke(initial_state)
-    return {
-        "answer": result["final_answer"],
-        "route": result.get("route", "direct"),
-        "context": result.get("context", ""),
-    }
+
+async def stream_agent(
+    *,
+    question: str,
+    history: list[dict],
+    summary: str | None,
+    tools: MCPToolClient,
+    max_iterations: int = 8,
+) -> AsyncIterator[AgentEvent]:
+    task = AgentTask(
+        question=question,
+        history=to_langchain_messages(history),
+        summary=summary or "",
+    )
+    deps = AgentDeps(
+        model=get_chat_model(),
+        tools=tools,
+        context=build_context_engine(),
+        max_iterations=max_iterations,
+    )
+
+    async for event in run_agent_stream(task, deps):
+        yield event

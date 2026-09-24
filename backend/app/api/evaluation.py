@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -11,12 +11,13 @@ router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
 
 class EvalRequest(BaseModel):
     queries: list[str]
-    has_docs: bool = False
 
 
 @router.post("/run")
-async def run_eval(request: EvalRequest, db: Session = Depends(get_db)):
-    results = run_evaluation(request.queries, request.has_docs)
+async def run_eval(
+    request: EvalRequest, app_request: Request, db: Session = Depends(get_db)
+):
+    results = await run_evaluation(request.queries, app_request.app.state.mcp_client)
 
     for r in results:
         record = EvaluationModel(

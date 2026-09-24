@@ -13,6 +13,8 @@ from app.api.knowledge import router as knowledge_router
 from app.api.tools import router as tools_router
 from app.api.evaluation import router as eval_router
 from app.api.conversations import router as conversations_router
+from app.mcp.client import open_tool_client
+from app.mcp.server import mcp_server
 
 import app.models.conversation  # noqa: F401
 import app.models.message       # noqa: F401
@@ -53,7 +55,11 @@ async def lifespan(app: FastAPI):
             logger.exception("检索链路预载失败，将在首次请求时重试")
         else:
             logger.info("检索链路预载完成，耗时 %.2fs", time.perf_counter() - started)
-    yield
+
+    # MCP 工具客户端与 Server 同进程，整个应用生命周期内复用同一个会话
+    async with open_tool_client(mcp_server) as tool_client:
+        app.state.mcp_client = tool_client
+        yield
 
 
 app = FastAPI(title="Agentic RAG API", version="0.1.0", lifespan=lifespan)

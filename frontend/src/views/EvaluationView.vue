@@ -124,7 +124,7 @@ const avgRelevancy = computed(() => {
 async function handleRun() {
   const queries = queryText.value.split('\n').filter(q => q.trim())
   if (!queries.length) return
-  await run(queries, false)
+  await run(queries)
 }
 
 // 1. Run Button Animation — pulse ring on click
