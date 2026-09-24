@@ -10,6 +10,14 @@ from typing import Protocol
 
 
 class TokenCounter(Protocol):
+    """token 计数器。
+
+    除「非负」外还有一个**隐含前提**：在**同一段文本的前缀**上，`count` 不应随长度
+    减少而增大 —— 也就是 `count(text[:n])` 对 n 不增。本引擎的硬截断按这个前提做
+    比例收缩；违反它不会死循环（收缩步长严格递减），但可能反超该层预算。引擎里
+    有一处防御性兜底会在收缩到 1 个字符仍不合规时把该条整个丢掉。
+    """
+
     def count(self, text: str) -> int: ...
 
 

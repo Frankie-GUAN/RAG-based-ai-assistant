@@ -1,7 +1,7 @@
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.context.engine import ContextBudget, ContextEngine
+from app.context.engine import _TRUNCATION_NOTE, ContextBudget, ContextEngine
 from app.context.tokens import HeuristicTokenCounter
 
 
@@ -104,6 +104,45 @@ def test_oversized_summary_is_truncated_within_the_memory_budget(engine):
     memory_stat = next(s for s in result.stats if s.name == "memory")
     assert memory_stat.truncated is True
     assert memory_stat.used <= memory_stat.budget
+
+
+class _NonMonotoneCounter:
+    """在**截断提示的长度**处跳变的计数器：不长于提示时按字数计，一旦超过就固定 1000。
+
+    真实计数器不会这样，这是合成反例。阈值刻意取 `len(_TRUNCATION_NOTE)`：只有在这个
+    点上跳变，才能让「收缩到 1 个字符 + 提示」仍然超预算，从而让引擎那段兜底分支
+    真正可达。（早先我用「短文本固定更贵」的写法试过，那个构造到不了该分支，用例
+    加不加兜底都是绿的 —— 一句话：没有实测就写下的护栏，很可能什么都不护。）
+    """
+
+    def count(self, text: str) -> int:
+        if not text:
+            return 0
+        return len(text) if len(text) <= len(_TRUNCATION_NOTE) else 1000
+
+
+def test_truncation_never_overshoots_a_layer_budget():
+    """不变量：任何计数器下，每一层的 used 都不得超过该层预算。
+
+    面对违反 TokenCounter 隐含前提的计数器时，唯一能守住这条契约的就是引擎里的
+    兜底分支（把塞不下的条目整个丢掉）。去掉那段分支，这个用例会红。
+    """
+    engine = ContextEngine(
+        budget=ContextBudget(total_tokens=2_000), counter=_NonMonotoneCounter()
+    )
+
+    for size in (1, 50, 101, 299, 300, 301, 1_000, 5_000, 20_000):
+        result = engine.build(
+            system="系" * size,
+            question="问" * size,
+            summary="记" * size,
+            retrieved=["片" * size for _ in range(5)],
+            scratchpad="稿" * size,
+        )
+        for stat in result.stats:
+            assert stat.used <= stat.budget, (
+                f"{stat.name} 层越界: used={stat.used} budget={stat.budget} (size={size})"
+            )
 
 
 def test_stats_cover_every_layer(engine):

@@ -52,6 +52,17 @@ class LayerStat:
 
 @dataclass(frozen=True)
 class ContextResult:
+    """装配结果。
+
+    **不是 prompt 的硬性 token 上界。** 本引擎约束的是**每一层自己的 used**，而
+    `question` 不过计数器、层标题与分隔符（【参考资料】、`"\\n\\n"` 等）也都不计，
+    五层比例之和又恰好是 1.00。因此各层都填满时，最终 prompt 的实际 token 数会
+    **超过** `ContextBudget.total_tokens`。
+
+    需要硬上界的话得由调用方另行截断 —— Task 7 的 ReAct 循环每一轮都会重入
+    `build`，更不能把它当成预算保证。
+    """
+
     messages: list[BaseMessage]
     stats: list[LayerStat]
 
@@ -157,6 +168,14 @@ class ContextEngine:
             while allowed_chars > 1 and self._counter.count(clipped) > remaining:
                 allowed_chars = max(1, allowed_chars * remaining // self._counter.count(clipped))
                 clipped = item[:allowed_chars] + _TRUNCATION_NOTE
+
+            if self._counter.count(clipped) > remaining:
+                # 收缩到 1 个字符仍然塞不下，说明 count() 在这个长度区间是非单调的
+                # （越短反而越贵）。TokenCounter 协议没有声明「缩短必然变便宜」这个
+                # 前提，所以这里兜底：宁可整条丢掉，也不能让该层用量越界。
+                # 启发式计数器与真实 BPE 都到不了这一步，属于防御性分支。
+                truncated = True
+                break
 
             kept.append(clipped)
             used += self._counter.count(clipped)
