@@ -64,7 +64,17 @@ def sqlite_session():
         engine.dispose()
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def anyio_backend():
-    """让 @pytest.mark.anyio 测试跑在 asyncio 上（pytest 的 anyio 插件要求此 fixture）。"""
+    """让 @pytest.mark.anyio 测试只跑在 asyncio 上。
+
+    作用域必须与 anyio 插件自带的 fixture 一致（module）。插件把它声明为 module
+    作用域，若这里覆盖成 function，那么**任何 module 作用域的 fixture 依赖它都会在
+    收集期抛 ScopeMismatch**（Task 7 很可能会写那种 fixture），而依赖插件原版则正常 ——
+    等于用一个「固定后端」的小便利换掉了 module 作用域的可组合性。
+
+    另外要清楚：插件本身已提供这个 fixture，参数取自 get_available_backends()。
+    这里显式覆盖的唯一作用是固定为 asyncio —— 将来若装了 trio，也不会让每个 async
+    测试参数化翻倍。当前环境未装 trio，所以这层覆盖在今天是行为中性的。
+    """
     return "asyncio"

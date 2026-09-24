@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 from app.agent.protocol import (
+    AgentEvent,
     ErrorEvent,
     FinalEvent,
     TokenEvent,
@@ -9,8 +12,8 @@ from app.agent.protocol import (
     to_sse,
 )
 
-# 与前端事件分发（frontend/src/composables/useChat.ts）共享的契约。
-# 任何一边增删事件类型，此集合必须同步更新。
+# 与前端事件分发共享的契约（frontend/src/composables/useChat.ts；Task 8 才实现）。
+# 任何一边增删事件类型，此集合必须同步更新 —— 下面的守卫测试会强制这一点。
 EXPECTED_EVENT_TYPES = {
     "tool_call",
     "tool_result",
@@ -54,16 +57,29 @@ def test_error_event_is_machine_readable():
 
 
 def test_every_declared_event_type_is_covered():
-    """防止新增事件类型后忘记同步前端契约。"""
-    declared = {
-        ToolCallEvent.type,
-        ToolResultEvent.type,
-        TokenEvent.type,
-        FinalEvent.type,
-        ErrorEvent.type,
-    }
+    """守护「新增事件类型后必须同步前端契约」。
 
-    assert declared <= EXPECTED_EVENT_TYPES, f"出现了未登记的事件类型: {declared - EXPECTED_EVENT_TYPES}"
+    这里**遍历 AgentEvent 的子类**，而不是在测试里列一份手写清单 —— 手写清单只能
+    证明「清单与 EXPECTED 一致」，证明不了「模块里的类型都已登记」。实测：新增第六种
+    子类却两处都忘了同步时，手写清单版本会静默通过，自动发现版本直接失败。
+
+    基类 AgentEvent 不参与：它已被禁止实例化，不会产出任何 type。
+    断言用 == 而非 <=：多一个（后端加了未登记类型）或少一个（前端留了已删类型）
+    都说明两边脱节，都该失败。
+    """
+    declared = {cls.type for cls in AgentEvent.__subclasses__()}
+
+    assert declared == EXPECTED_EVENT_TYPES, (
+        f"事件类型与前端契约不一致：后端多了 {declared - EXPECTED_EVENT_TYPES}，"
+        f"契约多了 {EXPECTED_EVENT_TYPES - declared}"
+    )
+
+
+def test_base_class_cannot_be_instantiated():
+    """基类可实例化的话，AgentEvent().to_dict() 会给出 {"type": "event"} ——
+    又一个可序列化但没有生产者的类型。本模块的原则是这种类型不存在。"""
+    with pytest.raises(TypeError, match="基类"):
+        AgentEvent()
 
 
 def test_to_sse_keeps_chinese_readable():
