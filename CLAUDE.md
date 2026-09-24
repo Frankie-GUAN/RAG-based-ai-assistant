@@ -4,7 +4,7 @@
 
 ## 常用命令
 
-项目在仓库根目录只有一个虚拟环境：`.venv/Scripts/python.exe`（Windows，Python 3.11）。后端命令必须**在 `backend/` 目录下**执行，否则 `app` 包无法解析 —— 仓库没有 `pytest.ini`/`pyproject.toml`，pytest 依赖 rootdir 插入机制来找到包。
+项目在仓库根目录只有一个虚拟环境：`.venv/Scripts/python.exe`（Windows，Python 3.11）。后端命令必须**在 `backend/` 目录下**执行，否则 `app` 包无法解析 —— `backend/pytest.ini` 把 `testpaths` 设为 `tests`，并注册了 `requires_model` 标记。
 
 ```bash
 # 后端 —— 开发服务器（需要 MySQL 8 在运行；lifespan 里会调用 Base.metadata.create_all）
@@ -13,9 +13,12 @@ cd backend && ../.venv/Scripts/python.exe -m uvicorn app.main:app --reload --por
 # 后端 —— 依赖（requirements-dev.txt 即 `-r requirements.txt` 加 pytest）
 cd backend && ../.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
 
-# 测试
+# 测试（默认排除 requires_model —— 见下方「测试用例的依赖情况」）
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -v
 cd backend && ../.venv/Scripts/python.exe -m pytest tests/test_hybrid_search.py::test_rrf_empty_inputs -v
+
+# 需要下载大模型的用例**必须显式指定标记**，否则跑 0 个用例：
+cd backend && ../.venv/Scripts/python.exe -m pytest tests/test_reranker.py -m requires_model -v
 
 # 前端 —— 开发服务器 :5173，把 /api 代理到 http://localhost:8000
 cd frontend && npm run dev
@@ -27,12 +30,15 @@ cd frontend && npm run build
 docker compose up --build
 ```
 
-测试用例的依赖情况 —— 只有 `test_hybrid_search.py` 是完全自包含的：
+测试用例的依赖情况。`backend/pytest.ini` 的 `addopts` 默认排除标了 `requires_model` 的用例：
 
-- `test_agent.py` 会调用真实的 DeepSeek API（需要 `DEEPSEEK_API_KEY` 与网络）。
-- `test_reranker.py` 首次运行会下载/加载 BGE-Reranker（约 2GB）。
-- `test_chat_api.py` 走的是落库的对话链路，因此需要 MySQL。
+- `test_agent.py` 会调用真实的 DeepSeek API（需要 `DEEPSEEK_API_KEY` 与网络）。Task 7 会删除它。
+- `test_reranker.py` 需要 BGE-Reranker（约 2GB），已标 `requires_model` 而**默认不跑**。要跑必须显式加 `-m requires_model`（命令见上）—— 注意 `pytest tests/test_reranker.py` 会**跑 0 个用例并以退出码 5 结束**，不打印任何提示，脚本无法从退出码区分「通过」与「根本没跑」。仓库没有 CI，所以这个测试实际上无人覆盖。
+- `test_chat_api.py` 走的是落库的对话链路，因此需要 MySQL（Task 8 之后 DB 故障会降级为 SSE error 事件，届时不再需要）。
+- **自包含、裸跑即可**：`test_hybrid_search.py`、`test_message_order.py`、`test_retrieval_singletons.py`。
 - 仅收集用例就要约 35 秒，因为导入 `app.main` 会加载 LangChain/Chroma。
+
+**给新用例的约定**：任何要下载模型或加载 BGE-M3/Chroma 的用例都必须自己打 `@pytest.mark.requires_model`。`-m "not requires_model"` 也会匹配**没有**标记的用例 —— 忘了打标记，它就会在默认跑里执行，这正是 `test_reranker.py` 在 Task 3 之前的行为。
 
 前端没有 lint 脚本，也没有单元测试运行器。`playwright` 是 devDependency，用于临时驱动浏览器做视觉验证，产物落在 `screenshots/`。
 

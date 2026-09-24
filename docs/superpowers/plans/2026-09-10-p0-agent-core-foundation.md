@@ -891,10 +891,27 @@ id 36  conversation_id 17  assistant  2026-06-03 17:58:52
 
 **Files:**
 - Modify: `backend/app/models/conversation.py`
+- Create: `backend/pytest.ini`
 - Create: `backend/tests/test_message_order.py`
 - Modify: `backend/tests/conftest.py`
+- Modify: `backend/tests/test_reranker.py`（加 `requires_model` 标记）
 
-- [ ] **Step 1: 新建 `backend/pytest.ini`，并在 `backend/tests/conftest.py` 追加 SQLite fixture**
+> **本任务已交付（2026-09-24）。下面是原始规范；两处计划笔误已就地修正，另有几条交付时的新发现。**
+>
+> **计划笔误 1 —— `Files:` 清单漏了两个文件**（已补 `pytest.ini` 与 `test_reranker.py`）。这不是美观问题：只有 `pytest.ini` 而标记没打上时，`-m "not requires_model"` **仍会选中未打标记的 `test_reranker.py`**（pytest 的 `not X` 也匹配无标记的用例），默认跑照样下 2GB；反过来只有标记而没有 `pytest.ini`，标记未注册。两个文件都是 Step 1 自身目标的承重件。
+>
+> **计划笔误 2 —— Step 7 的 `git add` 清单同样漏了那两个文件**（已补）。
+>
+> **交付时的新发现：**
+>
+> 1. **这个缺陷是「潜在未定义顺序」，不是「当前可观察的错误输出」。** 实测真实库的全部 11 个会话，按 `created_at` 排与按 `id` 排得到**完全相同**的序列 —— MySQL 对这些小表恰好返回主键顺序。确凿的证据是**成因**（id 35/36 时间戳确实相同、列类型确实是无小数秒的裸 `datetime`）。修它仍然正确（依赖未定义行为本身就是缺陷，且改后 `conv.messages` 与 `list_conversations` 既有的 `func.max(Message.id)` 口径终于一致），但不要指望在现有数据上复现出颠倒的重放。
+> 2. **隔离 `test_reranker.py` 的代价要认**：仓库没有 CI，隔离之后**没有任何东西会跑它**，而 `pytest tests/test_reranker.py` 会跑 0 个用例、以**退出码 5** 结束且不打印提示。`CLAUDE.md` 已补上显式跑法、这条陷阱，以及「新加的慢用例必须自己打标记」的约定。
+> 3. **`sqlite_session` 原先踩了 `:memory:` 的线程池陷阱**：默认 `SingletonThreadPool` 下每个线程一个连接、也就是一个独立的空库，而摘要路径经 `run_in_executor` 跑在工作线程里（Task 9 正是要用这个 fixture 测它）。已改为 `StaticPool` + `check_same_thread=False`，并把 `create_all` 的表显式列出 —— 否则建出的表取决于当时导入了哪些模型，会随收集顺序漂移（单独跑两张、`app.main` 被导入后变四张）。
+> 4. **补了第三条测试**：原先两条挡不住 `order_by="Message.created_at.desc()"` —— 降序排出来同样是 `['user','assistant']`。用交错时间戳（t+10 → t+0 → t+5）把升序、降序、按 id 三种排法彻底分开，实测只有按 id 匹配。
+> 5. **同类时间戳排序风险另清了三处**（秒精度列 + 并列值）：`knowledge_service.list_documents`、`api/evaluation.py` 的 `/history`（这里有 `LIMIT`，不稳定的是**哪些行**落在第 50 条边界上，刷新时记录会进进出出）、`conversation_service.list_conversations` 的侧栏顺序。三处都补了 `id` 作次级键。
+> 6. **「一套命令全绿」这个完成标准，Task 3 只兑现了一部分**：裸 `pytest` 仍会收集 `test_agent.py`（真实 key）与 `test_chat_api.py`（真实 MySQL）。要等 Task 7 删掉前者、Task 8 让 `chat.py` 把 DB 故障降级成 SSE error 事件（届时后者 HTTP 仍返回 200）才成立。
+
+- [x] **Step 1: 新建 `backend/pytest.ini`，并在 `backend/tests/conftest.py` 追加 SQLite fixture**
 
 先解决「一套命令全绿」的前提：`tests/test_reranker.py` 会下载并加载约 2GB 的 Cross-Encoder，不能进默认收集。仓库当前没有任何 pytest 配置，正好一并建立。
 
@@ -943,7 +960,7 @@ def sqlite_session():
         engine.dispose()
 ```
 
-- [ ] **Step 2: 写失败的测试 `backend/tests/test_message_order.py`**
+- [x] **Step 2: 写失败的测试 `backend/tests/test_message_order.py`**
 
 ```python
 """消息时序回归测试。
@@ -1009,7 +1026,7 @@ def test_ordering_survives_identical_timestamps(sqlite_session):
     assert [m.role for m in reloaded.messages] == ["user", "assistant"]
 ```
 
-- [ ] **Step 3: 运行测试，确认失败**
+- [x] **Step 3: 运行测试，确认失败**
 
 ```bash
 cd backend
@@ -1018,7 +1035,7 @@ cd backend
 
 Expected: `test_ordering_is_by_id_not_timestamp` FAIL —— 得到 `["assistant", "user"]`（按 created_at 排出来的顺序）。第二条用例可能碰巧通过，这正是需要第一条的原因。
 
-- [ ] **Step 4: 修改 `backend/app/models/conversation.py`**
+- [x] **Step 4: 修改 `backend/app/models/conversation.py`**
 
 ```python
     # 按自增 id 排序，不按 created_at：created_at 是秒精度，同一次问答的
@@ -1026,7 +1043,7 @@ Expected: `test_ordering_is_by_id_not_timestamp` FAIL —— 得到 `["assistant
     messages = relationship("Message", back_populates="conversation", order_by="Message.id")
 ```
 
-- [ ] **Step 5: 运行测试，确认通过**
+- [x] **Step 5: 运行测试，确认通过**
 
 ```bash
 cd backend
@@ -1035,7 +1052,7 @@ cd backend
 
 Expected: 2 passed
 
-- [ ] **Step 6: 在真实库上复核**
+- [x] **Step 6: 在真实库上复核**
 
 SQLite 不能完全代表 MySQL 的返回顺序，所以在开发库上再确认一次：
 
@@ -1045,10 +1062,10 @@ mysql -u root -p rag_agent -e "SELECT conversation_id, GROUP_CONCAT(role ORDER B
 
 然后启动后端，对一个已有会话调 `GET /api/conversations/{id}`，确认 `messages` 里 user 在 assistant 之前。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
-git add backend/app/models/conversation.py backend/tests/conftest.py backend/tests/test_message_order.py
+git add backend/app/models/conversation.py backend/pytest.ini backend/tests/conftest.py backend/tests/test_message_order.py backend/tests/test_reranker.py
 git commit -m "fix: order conversation messages by id, not by second-precision timestamp
 
 messages.created_at is a MySQL DATETIME with no fractional seconds, and
