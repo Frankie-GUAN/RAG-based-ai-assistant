@@ -1712,6 +1712,8 @@ git commit -m "feat: add layered context engineering engine with per-layer token
 - Modify: `backend/app/api/tools.py`
 - Delete: `backend/app/tools/registry.py`, `backend/app/tools/schemas.py`
 
+> **提交前先核对待提交集合。** 本任务的 `git add` 用了 `-A`（为了记录上面两个删除），可能扫进工作区里与本任务无关的改动（`.claude/settings.local.json`、`frontend/package*.json`、`screenshots/` 长期以未提交状态存在）。提交前跑一次 `git status --short`，确认暂存的**只**是上表列出的文件。
+
 - [ ] **Step 1: 改写 `backend/app/tools/document_search.py`**
 
 返回结构化数据（不再拼字符串、不再注册 registry），供 Agent 与引用溯源使用：
@@ -2174,7 +2176,12 @@ undecidable 'Error executing tool X'."
 - Create: `backend/tests/fakes.py`
 - Create: `backend/tests/test_agent_core.py`
 - Modify: `backend/app/services/chat_service.py`
+- Modify: `backend/app/services/evaluation_service.py`（Step 9 —— 它 import 了将被删除的 `agent_graph`，不改就 ImportError）
+- Modify: `backend/app/main.py`（Step 10 —— 挂载 MCP 工具客户端）
 - Delete: `backend/app/agent/graph.py`, `backend/app/agent/nodes.py`
+- Delete: `backend/tests/test_agent.py`（Step 8 —— 直接调 `agent_graph.invoke`，且需真实 DeepSeek key）
+
+> **提交前先核对待提交集合。** 本任务的 `git add` 用了 `-A`（为了记录 `graph.py` / `nodes.py` / `test_agent.py` 的删除），可能扫进工作区里与本任务无关的改动（`.claude/settings.local.json`、`frontend/package*.json`、`screenshots/` 长期以未提交状态存在）。提交前跑一次 `git status --short`，确认暂存的**只**是上表列出的文件。
 
 - [ ] **Step 1: 实现 `backend/app/agent/llm.py`**
 
@@ -2920,8 +2927,11 @@ API key or network."
 
 **Files:**
 - Modify: `backend/app/api/chat.py`
+- Modify: `backend/app/main.py`（Step 4 —— 版本号；MCP 客户端挂载已在 Task 7 Step 10 完成）
 - Modify: `frontend/src/composables/useChat.ts`
 - Create: `backend/tests/test_streaming.py`
+
+> **提交前先核对待提交集合。** 本任务与 Task 6/7 的 `git add` 命令用了 `-A`（为了记录删除），可能扫进工作区里与本任务无关的改动（`.claude/settings.local.json`、`frontend/package*.json`、`screenshots/` 长期以未提交状态存在）。提交前跑一次 `git status --short`，确认暂存的**只**是上表列出的文件。
 
 - [ ] **Step 1: 写失败的测试 `backend/tests/test_streaming.py`**
 
