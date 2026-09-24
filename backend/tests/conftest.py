@@ -62,3 +62,9 @@ def sqlite_session():
     finally:
         session.close()
         engine.dispose()
+
+
+@pytest.fixture
+def anyio_backend():
+    """让 @pytest.mark.anyio 测试跑在 asyncio 上（pytest 的 anyio 插件要求此 fixture）。"""
+    return "asyncio"
