@@ -39,7 +39,8 @@ const navRef = ref<HTMLElement | null>(null)
 const navItems: Array<{ path: string; label: string; icon: string }> = [
   { path: '/', label: '对话', icon: '◈' },
   { path: '/knowledge', label: '知识库', icon: '⧉' },
-  { path: '/evaluation', label: '评估', icon: '⧗' },
+  // 评估页（/evaluation）已从导航移除：它是开发期的工具，个人日常使用里
+  // 零价值，却占着一个一级入口。路由仍在，直接访问 URL 可用。
 ]
 
 onMounted(() => {

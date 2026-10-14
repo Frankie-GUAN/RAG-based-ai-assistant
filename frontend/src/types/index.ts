@@ -22,8 +22,10 @@ export interface DocumentRecord {
 export interface EvalResult {
   query: string
   answer: string
-  faithfulness: number
-  answer_relevancy: number
+  /** null = 判官没能给出可解析的分数。不再把它伪装成 0（那会伪造出一条质量问题） */
+  faithfulness: number | null
+  answer_relevancy: number | null
+  error?: string | null
 }
 
 export interface ConversationSummary {

@@ -40,6 +40,12 @@
           </div>
         </div>
 
+        <!-- 判官失灵的样本被排除在平均之外，必须说出来，否则数字看起来仍然「有结论」 -->
+        <p v-if="missingScores" class="text-xs mb-6" style="color: var(--ink-faint)">
+          {{ missingScores }} of {{ results.length }} queries could not be scored (judge output was not a number) —
+          excluded from the averages rather than counted as 0.
+        </p>
+
         <!-- Individual results -->
         <div v-for="(r, i) in results" :key="i"
           class="result-card rounded-xl p-5" style="background: var(--white); border: 1px solid var(--rule)">
@@ -53,28 +59,28 @@
               <div class="flex justify-between mb-1">
                 <span class="text-[10px] uppercase tracking-wider" style="color: var(--ink-muted)">Faithfulness</span>
                 <span class="score-value text-xs font-semibold tabular-nums"
-                  :data-score="Math.round(r.faithfulness * 100)"
-                  :style="{ color: r.faithfulness >= 0.7 ? 'var(--sage-deep)' : 'var(--clay)' }">0%</span>
+                  :data-score="scorePercent(r.faithfulness)"
+                  :style="scoreStyle(r.faithfulness)">{{ formatScore(r.faithfulness) }}</span>
               </div>
               <div class="h-1 rounded-full overflow-hidden" style="background: var(--rule-light)">
                 <div class="progress-fill h-full rounded-full"
-                  :data-target="Math.round(r.faithfulness * 100)"
+                  :data-target="scorePercent(r.faithfulness)"
                   style="width: 0%"
-                  :style="{ width: '0%', background: r.faithfulness >= 0.7 ? 'var(--sage)' : 'var(--clay)' }"></div>
+                  :style="{ width: '0%', background: scoreColor(r.faithfulness) }"></div>
               </div>
             </div>
             <div class="flex-1">
               <div class="flex justify-between mb-1">
                 <span class="text-[10px] uppercase tracking-wider" style="color: var(--ink-muted)">Relevancy</span>
                 <span class="score-value text-xs font-semibold tabular-nums"
-                  :data-score="Math.round(r.answer_relevancy * 100)"
-                  :style="{ color: r.answer_relevancy >= 0.7 ? 'var(--sage-deep)' : 'var(--clay)' }">0%</span>
+                  :data-score="scorePercent(r.answer_relevancy)"
+                  :style="scoreStyle(r.answer_relevancy)">{{ formatScore(r.answer_relevancy) }}</span>
               </div>
               <div class="h-1 rounded-full overflow-hidden" style="background: var(--rule-light)">
                 <div class="progress-fill h-full rounded-full"
-                  :data-target="Math.round(r.answer_relevancy * 100)"
+                  :data-target="scorePercent(r.answer_relevancy)"
                   style="width: 0%"
-                  :style="{ width: '0%', background: r.answer_relevancy >= 0.7 ? 'var(--sage)' : 'var(--clay)' }"></div>
+                  :style="{ width: '0%', background: scoreColor(r.answer_relevancy) }"></div>
               </div>
             </div>
           </div>
@@ -88,8 +94,8 @@
           <div v-for="h in history" :key="h.id" class="flex items-center justify-between px-4 py-3 rounded-xl" style="background: var(--white); border: 1px solid var(--rule)">
             <p class="text-xs truncate flex-1 mr-4" style="color: var(--ink-muted)">{{ h.query }}</p>
             <div class="flex gap-4 text-xs font-semibold shrink-0">
-              <span :style="{ color: h.faithfulness >= 0.7 ? 'var(--sage)' : 'var(--clay)' }">F {{ (h.faithfulness * 100).toFixed(0) }}%</span>
-              <span :style="{ color: h.answer_relevancy >= 0.7 ? 'var(--sage)' : 'var(--clay)' }">R {{ (h.answer_relevancy * 100).toFixed(0) }}%</span>
+              <span :style="scoreStyle(h.faithfulness)">F {{ formatScore(h.faithfulness) }}</span>
+              <span :style="scoreStyle(h.answer_relevancy)">R {{ formatScore(h.answer_relevancy) }}</span>
             </div>
           </div>
         </div>
@@ -110,16 +116,38 @@ onMounted(() => {
   fetchHistory()
 })
 
-const avgFaithfulness = computed(() => {
-  if (!results.value.length) return 0
-  const sum = results.value.reduce((a, r) => a + (r.faithfulness || 0), 0)
-  return Math.round((sum / results.value.length) * 100)
-})
-const avgRelevancy = computed(() => {
-  if (!results.value.length) return 0
-  const sum = results.value.reduce((a, r) => a + (r.answer_relevancy || 0), 0)
-  return Math.round((sum / results.value.length) * 100)
-})
+/** 分数可能是 null —— 判官没能给出可解析的数字（后端不再把它伪装成 0）。 */
+function formatScore(v: number | null): string {
+  return v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`
+}
+function scorePercent(v: number | null): number {
+  return v === null || v === undefined ? 0 : Math.round(v * 100)
+}
+function scoreColor(v: number | null): string {
+  return v === null || v === undefined ? 'var(--rule)' : v >= 0.7 ? 'var(--sage)' : 'var(--clay)'
+}
+function scoreStyle(v: number | null) {
+  return { color: v === null || v === undefined ? 'var(--ink-faint)' : v >= 0.7 ? 'var(--sage-deep)' : 'var(--clay)' }
+}
+
+/**
+ * 平均值只统计**有分数**的样本。
+ * 旧实现是 sum/(总数)，缺失的分数按 0 计入 —— 那等于把「没测出来」当成
+ * 「测出来是 0」，批量评测里判官偶发失灵就会把平均分整体拉低。
+ */
+function averageOf(key: 'faithfulness' | 'answer_relevancy'): number {
+  const scored = results.value.filter(r => r[key] !== null && r[key] !== undefined)
+  if (!scored.length) return 0
+  const sum = scored.reduce((a, r) => a + (r[key] as number), 0)
+  return Math.round((sum / scored.length) * 100)
+}
+
+const missingScores = computed(() =>
+  results.value.filter(r => r.faithfulness === null || r.faithfulness === undefined).length
+)
+
+const avgFaithfulness = computed(() => averageOf('faithfulness'))
+const avgRelevancy = computed(() => averageOf('answer_relevancy'))
 
 async function handleRun() {
   const queries = queryText.value.split('\n').filter(q => q.trim())
