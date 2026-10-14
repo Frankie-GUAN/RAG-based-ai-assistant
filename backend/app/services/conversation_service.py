@@ -1,11 +1,14 @@
 import json
+import logging
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc, delete, update
+from app.agent.llm import get_chat_model
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.config import settings
-from langchain_openai import ChatOpenAI
+
+logger = logging.getLogger(__name__)
 
 
 def create_conversation(db: Session, title: str = "新对话") -> Conversation:
@@ -85,14 +88,11 @@ def get_conversation_with_context(db: Session, conversation_id: int) -> dict:
 
     messages = conv.messages  # 按 Message.id 排序，见 Conversation.messages 的 order_by
 
-    # Compression check
-    if len(messages) > settings.history_window_size:
-        if not conv.summary:
-            old = messages[:-settings.history_window_size]
-            conv.summary = _generate_summary(old)
-            db.flush()
-
-        recent = messages[-settings.history_window_size:]
+    # 滚动摘要：把「新滑出窗口」的那批合并进已有摘要
+    window = settings.history_window_size
+    if len(messages) > window:
+        _roll_summary(db, conv, messages, window)
+        recent = messages[-window:]
     else:
         recent = messages
 
@@ -153,26 +153,53 @@ def delete_conversation(db: Session, conversation_id: int) -> None:
     db.execute(delete(Conversation).where(Conversation.id == conversation_id))
 
 
-def _generate_summary(messages: list[Message]) -> str:
+def _roll_summary(
+    db: Session, conv: Conversation, messages: list[Message], window: int
+) -> None:
+    """把新滑出窗口的消息合并进已有摘要。
+
+    旧实现只在 `summary` 为空时摘要一次，其后永不更新 —— 窗口=10 时第 11 条消息
+    触发摘要（只覆盖了第 1 条），此后第 2 条到第 N-10 条**既不在摘要里、也不在
+    最近窗口里**，静默从上下文里消失。
+
+    **失败时不推进水位线**，下个请求自然重试。旧实现把兜底文案
+    `历史对话 (N 条消息)` 写进 `conv.summary`，一次 LLM 抖动就把这个空壳摘要永久
+    钉死在该会话上。
+    """
+    cutoff = messages[-window].id                    # 窗口起点，之前的都属于「窗口外」
+    upto = conv.summary_upto_message_id
+    pending = [
+        m for m in messages
+        if m.id < cutoff and (upto is None or m.id > upto)
+    ]
+    if not pending:
+        return
+
+    merged = _merge_summary(conv.summary, pending)
+    if merged is None:
+        return                                        # 失败：交给下个请求重试
+
+    conv.summary = merged
+    conv.summary_upto_message_id = pending[-1].id
+    db.flush()
+
+
+def _merge_summary(previous: str | None, pending: list[Message]) -> str | None:
+    """合并摘要。失败返回 None（调用方据此不推进水位线）。"""
     transcript = "\n".join(
-        f"{'用户' if m.role == 'user' else '助手'}: {m.content}" for m in messages
+        f"{'用户' if m.role == 'user' else '助手'}: {m.content}" for m in pending
+    )
+    prior = f"已有摘要：\n{previous}\n\n" if previous else ""
+    prompt = (
+        f"{prior}以下是新增的对话片段：\n{transcript}\n\n"
+        "请输出一份更新后的对话摘要，保留关键事实、决策与用户意图，"
+        f"总长度不超过 {settings.context_summary_max_chars} 字。只输出摘要本身。"
     )
     try:
-        llm = ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-            temperature=0.2,
-        )
-        prompt = (
-            "请用简洁的中文总结以下对话历史，保留关键事实、决策和用户意图，不超过5句话：\n\n"
-            f"{transcript}\n\n摘要："
-        )
-        result = llm.invoke(prompt)
-        return result.content
-    except Exception:
-        # If LLM is unavailable, return a simple fallback summary
-        return f"历史对话 ({len(messages)} 条消息)"
+        return get_chat_model().invoke(prompt).content
+    except Exception:  # noqa: BLE001 —— 失败不缓存，交由下个请求重试
+        logger.warning("摘要合并失败，本次不推进水位线", exc_info=True)
+        return None
 
 
 def _truncate(text: str, max_len: int) -> str:

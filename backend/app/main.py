@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db.base import Base
+from app.db.migrate import ensure_columns
 from app.db.session import engine
 from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
@@ -44,6 +45,8 @@ def _preload_retrieval() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    # 必须在 create_all 之后：create_all 只建表不给已有表加列
+    ensure_columns(engine)
     if settings.preload_models:
         import time
 
