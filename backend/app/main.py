@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title="Agentic RAG API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Agentic RAG API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
