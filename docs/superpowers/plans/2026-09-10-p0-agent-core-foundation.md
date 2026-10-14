@@ -2953,6 +2953,13 @@ API key or network."
 
 ## Task 8: 真流式 SSE
 
+> **✅ 已于 2026-10-14 交付，但实现与下面的原始规范有出入** —— 以仓库现状为准，
+> 差异记在 `docs/tech-notes/verified-facts.md` §5。改动点：
+> ① `ChatRequest.has_docs` 被删除（ReAct 下由模型自主决定是否检索，客户端声明不再有作用）；
+> ② 只有拿到答案才落助手消息，`final` 之前会先外发 `citation` 事件；
+> ③ 事件序列不再是 `token…→final`，而是 `tool_call → tool_result → citation → token… → final`。
+> 本任务之后，Task 9（滚动增量摘要）与 Task 10（评测收尾）仍待执行。
+
 **Files:**
 - Modify: `backend/app/api/chat.py`
 - Modify: `backend/app/main.py`（Step 4 —— 版本号；MCP 客户端挂载已在 Task 7 Step 10 完成）
