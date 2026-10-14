@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     # Reranker
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    # 精排开关。CPU 上精排 10 个候选约 1~3 秒，因此它是可关闭的：
+    # 关掉即回到纯 RRF 融合顺序。
+    enable_reranker: bool = True
+    # 送进精排的候选数。精排只在这 N 个里重排，所以它决定精排的耗时与收益上限。
+    rerank_candidates: int = 10
 
     # 上下文工程：分层 token 预算
     context_total_tokens: int = 32_000

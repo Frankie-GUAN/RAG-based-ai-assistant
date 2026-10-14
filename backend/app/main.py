@@ -28,12 +28,17 @@ def _preload_retrieval() -> None:
     """在启动线程里把检索链路拉起来，避免第一个请求付 10s 冷启动、
     也避免并发请求一起去加载。"""
     from app.rag.bm25_index import get_bm25_index
+    from app.rag.reranker import get_reranker
     from app.rag.vector_store import get_embeddings, get_vectorstore, has_persisted_index
 
     get_embeddings()
     if has_persisted_index():
         get_vectorstore()
     get_bm25_index()
+    if settings.enable_reranker:
+        # 精排模型同样在CPU 上冷启动很慢。不预载的话，第一个需要检索的请求会
+        # 独自承担模型加载（数秒到数十秒），而它是唯一知情者。
+        get_reranker()
 
 
 @asynccontextmanager

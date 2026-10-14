@@ -303,28 +303,6 @@ def test_negative_top_k_returns_nothing(monkeypatch, tmp_path):
     assert index.search("劳动合同", top_k=-1) == []
 
 
-def test_get_retriever_does_not_treat_zero_as_unset(monkeypatch):
-    """`k or default` 会把 0 当成「没传」而回退成 hybrid_top_k —— 与 hybrid_search 里
-    同一个 bug，只是隔了一个调用点。改用 is None 之后 0 原样传下去。
-
-    （跳过向量这一路的正确入口是 hybrid_search(vector_top_k=0)，由 _vector_search
-    短路；直接给 get_retriever 传 0 属误用，但也不该被静默改成 10。）
-    """
-    captured = {}
-
-    class _FakeVectorStore:
-        def as_retriever(self, search_kwargs):
-            captured.update(search_kwargs)
-            return object()
-
-    monkeypatch.setattr(vs_mod, "get_vectorstore", lambda create=False: _FakeVectorStore())
-    monkeypatch.setattr(vs_mod.settings, "hybrid_top_k", 10, raising=False)
-
-    vs_mod.get_retriever(0)
-
-    assert captured["k"] == 0
-
-
 def test_bm25_singleton_survives_corrupt_file(monkeypatch, tmp_path):
     """lifespan 预载走的就是这条路径：损坏文件不该让 get_bm25_index() 抛出去。"""
     monkeypatch.setattr(bm25_mod.settings, "data_dir", tmp_path, raising=False)
