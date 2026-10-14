@@ -11,6 +11,8 @@ __pycache__/
 
 # Local data/cache
 data/chroma/
+# 索引备份（app.rag.ingest --fresh 留下的旧格式索引，可能是唯一的副本，留在本机）
+data/chroma.bak.*/
 data/uploads/
 data/models/
 # BM25 索引产物：由 rank_bm25 构建后 pickle 落盘，属本地状态，不应入库
