@@ -1,31 +1,55 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-sse-starlette>=2.0.0
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
+# 版本全部钉死（==），不是 >=。
+#
+# 理由不是洁癖：2026-10-14 这一天，宽松下限先后造成了两次真实故障 ——
+#   1) chromadb 从 0.5.x 升到 1.5.9 后，旧持久化索引（hnsw-local-persisted 段）
+#      读不出来，903 条向量的知识库形同消失，且没有任何报错提示检索已失效；
+#   2) pyarrow 24 与 torch 2.12 在同一进程里按某种顺序加载时，pyarrow 的原生扩展
+#      直接让进程崩在 create_module（exit 139），pytest 只留下一行
+#      "Segmentation fault"，`python -c "import app.main"` 毫无输出。
+#两次都是「装的时候没事，跑到某个时刻才炸」。下面这些版本是本机实测可用的组合。
+#
+# 升级任一项前请先跑 `cd backend && ../.venv/Scripts/python.exe -m pytest tests/ -q`。
+
+# Python：3.11~3.13 实测（本机是 3.13.2）。Docker 镜像与之保持一致。
+
+# Web 框架
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+sse-starlette==3.4.4
+pydantic==2.13.4
+pydantic-settings==2.14.1
 
 # Agent / LLM
-langchain>=1.0.0
-langchain-community>=0.4.0
-langchain-huggingface>=1.0.0
-langchain-openai>=1.0.0
-langgraph>=1.0.0
+langchain==1.2.18
+langchain-community==0.4.1
+langchain-huggingface==1.2.2
+langchain-openai==1.2.1
+langgraph==1.1.10
 
-# MCP 工具协议
+# MCP 工具协议。类名是 MCPServer 而非 FastMCP，2.x 字段全snake_case ——
+# 见 docs/tech-notes/verified-facts.md
 mcp==2.2.0
 
 # 检索
-chromadb>=1.0.0
-rank-bm25>=0.2.2
-jieba>=0.42.1
-sentence-transformers>=3.0.0
-pypdf>=4.0.0
+chromadb==1.5.9
+# rank_bm25 的版本影响磁盘索引：pickle 里嵌着活的 BM25Okapi 实例，升级会让
+# data/bm25_index.pkl 直接读不出来（降级为「索引不可用」而不是崩溃）。
+rank-bm25==0.2.2
+jieba==0.42.1
+sentence-transformers==5.5.0
+pypdf==6.11.0
+# transformers / huggingface_hub 走 requests 下载模型，而 Windows 上的 venv 常常
+# 没有可用的 CA 证书，报 CERTIFICATE_VERIFY_FAILED（pip 自己的证书链是够的，
+# 于是出现「pip 能装、HuggingFace 却下不动」这种错觉）。certifi 补上这条链。
+certifi==2026.4.22
 
 # 存储
-sqlalchemy>=2.0.0
-pymysql>=1.1.0
-cryptography>=42.0.0
+sqlalchemy==2.0.49
+pymysql==1.2.0
+cryptography==48.0.0
 
 # 其他
-python-multipart>=0.0.12
-google-search-results>=2.4.2
+python-multipart==0.0.28
+# 联网搜索依赖。当前 venv 里其实没装（所以 search_web 一调就失败）；
+# 不需要联网搜索的话可以从这里和 .env 里的 SERPAPI_KEY 一起删掉。
+google-search-results==2.4.2
