@@ -76,11 +76,7 @@ export function useChat() {
               currentRoute.value = data.ok ? `工具返回（${data.ms}ms）` : `工具失败：${data.error}`
               break
             case 'citation':
-              roundSources.push({
-                title: data.source || '未知来源',
-                link: data.link || '',
-                snippet: data.chunk,
-              })
+              roundSources.push(toSource(data))
               break
             case 'final':
               finalAnswer = data.answer
@@ -129,10 +125,21 @@ export function useChat() {
       role: (m.role as 'user' | 'assistant'),
       content: m.content,
       sourceType: (m.source_type as 'web' | 'doc') || undefined,
+      // 引用随历史一起回来：只在本次会话里显示来源，等于关掉页面就没了
+      sources: m.sources?.length ? m.sources.map(toSource) : undefined,
     }))
     store.loadMessages(chatMessages)
     store.setConversationId(id)
   }
+
+/** 后端引用事件 → 前端来源条目。文档片段没有 URL，只有来源与摘要。 */
+function toSource(raw: any): Source {
+  return {
+    title: raw.source || '未知来源',
+    link: '',
+    snippet: raw.chunk,
+  }
+}
 
   function clearMessages() {
     streamError.value = ''

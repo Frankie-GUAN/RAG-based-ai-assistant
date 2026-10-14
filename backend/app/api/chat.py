@@ -20,7 +20,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from app.agent.protocol import ErrorEvent, FinalEvent, to_sse
+from app.agent.protocol import CitationEvent, ErrorEvent, FinalEvent, to_sse
 from app.db.session import SessionLocal
 from app.services.chat_service import stream_agent
 from app.services.conversation_service import (
@@ -72,6 +72,7 @@ async def _stream_chat(request: ChatRequest, http_request: Request) -> AsyncGene
         tools = http_request.app.state.mcp_client
         answer = ""
         had_error = False
+        citations: list[dict] = []
 
         async for event in stream_agent(
             question=request.question,
@@ -84,12 +85,23 @@ async def _stream_chat(request: ChatRequest, http_request: Request) -> AsyncGene
                 answer = event.answer
             elif isinstance(event, ErrorEvent):
                 had_error = True
+            elif isinstance(event, CitationEvent):
+                citations.append(event.to_dict())
             yield to_sse(event)
 
         # 只在真的拿到答案时才落助手消息：Agent 以 ErrorEvent 收尾时（空响应 /
         # 达到迭代上限）写一条空记录，只会让历史里出现无法解释的空洞。
         if answer:
-            save_message(db, conversation_id, "assistant", answer, source_type="agent")
+            save_message(
+                db,
+                conversation_id,
+                "assistant",
+                answer,
+                # 有引用就说明依据来自私有文档库；source_data 存引用本身，
+                # 此前这个字段定义了却从没有任何写入点 —— 引用溯源断在这里。
+                source_type="doc" if citations else "agent",
+                source_data=json.dumps(citations, ensure_ascii=False) if citations else None,
+            )
 
         # 用户消息无论如何都要留下：这一轮问过就是问过了，即便回答失败。
         db.commit()

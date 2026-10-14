@@ -4,6 +4,7 @@ import pytest
 
 from app.agent.protocol import (
     AgentEvent,
+    CitationEvent,
     ErrorEvent,
     FinalEvent,
     TokenEvent,
@@ -12,12 +13,13 @@ from app.agent.protocol import (
     to_sse,
 )
 
-# 与前端事件分发共享的契约（frontend/src/composables/useChat.ts；Task 8 才实现）。
+# 与前端事件分发共享的契约（frontend/src/composables/useChat.ts）。
 # 任何一边增删事件类型，此集合必须同步更新 —— 下面的守卫测试会强制这一点。
 EXPECTED_EVENT_TYPES = {
     "tool_call",
     "tool_result",
     "token",
+    "citation",
     "final",
     "error",
 }

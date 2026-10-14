@@ -8,8 +8,7 @@ to_dict() 序列化为 {"type": <事件名>, ...payload}。
   1. 本文件
   2. tests/test_protocol.py 的 EXPECTED_EVENT_TYPES —— 那条测试自动遍历
      AgentEvent 的子类，漏登记会直接失败
-  3. 前端的事件分发（frontend/src/composables/useChat.ts；Task 8 才实现，
-     在此之前该文件仍是旧的 content/done 行协议）
+  3. 前端的事件分发（frontend/src/composables/useChat.ts，按 payload 的 type 分发）
 """
 from __future__ import annotations
 
@@ -66,6 +65,22 @@ class TokenEvent(AgentEvent):
 class FinalEvent(AgentEvent):
     type: ClassVar[str] = "final"
     answer: str = ""
+
+
+@dataclass(frozen=True)
+class CitationEvent(AgentEvent):
+    """一条检索引用，供前端展示来源、供会话落库。
+
+    这是「回答可信」的唯一凭据：模型说「根据文档」，用户需要能点开看它依据的是
+    哪一段。`chunk_id` 指向 `rag/loader.py` 打的稳定标识，因此重新入库之后旧引用
+    依然指向同一段内容。
+    """
+
+    type: ClassVar[str] = "citation"
+    doc_id: str = ""
+    chunk: str = ""
+    source: str = ""
+    score: float = 0.0
 
 
 @dataclass(frozen=True)

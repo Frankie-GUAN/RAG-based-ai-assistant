@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc, delete, update
 from app.models.conversation import Conversation
@@ -108,11 +110,31 @@ def get_conversation_with_context(db: Session, conversation_id: int) -> dict:
                 "role": m.role,
                 "content": m.content,
                 "source_type": m.source_type,
+                # 引用溯源：source_data 存的是本轮检索命中的片段（JSON 数组）。
+                # 重载历史会话时若不返回它，来源只在本次会话里有，关掉页面就没了。
+                "sources": _parse_sources(m.source_data),
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             }
             for m in recent
         ],
     }
+
+
+def _parse_sources(raw: str | None) -> list[dict]:
+    """把 source_data 解析成前端能直接渲染的来源列表。
+
+    解析失败返回空列表而不是抛异常：一条历史消息的来源坏了，不该让整个会话
+    打不开。
+    """
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
 
 
 def rename_conversation(db: Session, conversation_id: int, title: str) -> Conversation:

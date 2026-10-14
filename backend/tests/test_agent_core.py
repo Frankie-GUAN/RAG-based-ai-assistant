@@ -69,7 +69,8 @@ async def test_agent_executes_tool_then_streams_the_answer():
         ]
 
     assert events_of(events) == [
-        "tool_call", "tool_result", "token", "token", "token", "final",
+        # 检索工具返回过片段，因此 final 之前会先外发引用（溯源）事件
+        "tool_call", "tool_result", "token", "token", "token", "citation", "final",
     ]
     call = events[0]
     assert call.name == "search_documents"

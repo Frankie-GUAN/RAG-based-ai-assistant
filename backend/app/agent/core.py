@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from app.agent.protocol import (
     AgentEvent,
+    CitationEvent,
     ErrorEvent,
     FinalEvent,
     TokenEvent,
@@ -27,6 +28,10 @@ from app.agent.protocol import (
 )
 from app.context.engine import ContextEngine
 from app.mcp.client import MCPToolClient
+
+# 一次回答最多外发多少条引用。检索默认取 top_k=4 条，一般不会触顶；触顶时
+# 保留最靠前的那些 —— 它们是精排/融合后的前排。
+_MAX_CITATIONS = 8
 
 SYSTEM_PROMPT = (
     "你是智能问答助手，基于私有文档知识库与联网搜索回答用户问题。"
@@ -70,6 +75,9 @@ async def run_agent_stream(task: AgentTask, deps: AgentDeps) -> AsyncIterator[Ag
     schemas = [spec.to_openai_schema() for spec in deps.tools.specs]
     bound = deps.model.bind_tools(schemas) if schemas else deps.model
 
+    citations: list[CitationEvent] = []
+    seen_doc_ids: set[str] = set()
+
     for _ in range(deps.max_iterations):
         accumulated: AIMessage | None = None
 
@@ -86,6 +94,8 @@ async def run_agent_stream(task: AgentTask, deps: AgentDeps) -> AsyncIterator[Ag
         messages.append(accumulated)
 
         if not accumulated.tool_calls:
+            for citation in citations:
+                yield citation
             yield FinalEvent(answer=_as_text(accumulated.content))
             return
 
@@ -110,11 +120,54 @@ async def run_agent_stream(task: AgentTask, deps: AgentDeps) -> AsyncIterator[Ag
                 tool_call_id=call["id"],
             ))
 
+            # 引用溯源：从检索工具的结果里提取引用片段。多轮里同一片段被反复召回
+            # 只算一次，否则来源列表会出现重复条目。
+            if result.ok and call["name"] == "search_documents":
+                for citation in _citations_from(result.data, seen_doc_ids):
+                    citations.append(citation)
+                    if len(citations) >= _MAX_CITATIONS:
+                        break
+
+    for citation in citations:
+        yield citation
     yield ErrorEvent(
         code="max_iterations",
         message=f"达到迭代上限 {deps.max_iterations}，未能得出结论",
         recoverable=True,
     )
+
+
+def _citations_from(data: Any, seen: set[str]) -> list[CitationEvent]:
+    """把 search_documents 的返回载荷转成引用事件。
+
+    载荷形状是 MCP 信封 `{"ok", "data", "error"}`（见 app/mcp/client.py），
+    真正的检索结果在 `data` 里，是一个 list[dict]，每项含
+    doc_id / content / source / score。
+
+    **不做严格校验。** 载荷形状变了就返回空列表（本次回答就没有来源），
+    而不是让整个工具结果解析失败 —— 溯源是增强，不该拖垮问答本身。
+    """
+    if isinstance(data, dict) and set(data) == {"ok", "data", "error"}:
+        data = data["data"]
+    if not isinstance(data, list):
+        return []
+
+    citations: list[CitationEvent] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        doc_id = str(item.get("doc_id") or "")
+        content = str(item.get("content") or "")
+        if not doc_id or not content or doc_id in seen:
+            continue
+        seen.add(doc_id)
+        citations.append(CitationEvent(
+            doc_id=doc_id,
+            chunk=content[:500],
+            source=str(item.get("source") or ""),
+            score=float(item.get("score") or 0.0),
+        ))
+    return citations
 
 
 def _as_text(content: Any) -> str:

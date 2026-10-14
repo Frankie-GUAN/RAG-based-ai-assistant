@@ -1,12 +1,23 @@
 <template>
   <div ref="panelRef" class="flex flex-wrap gap-2">
-    <a v-for="(source, i) in sources" :key="i" :href="source.link" target="_blank"
-      :ref="el => { if (el) sourceRefs[i] = el as HTMLElement }"
-      class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all duration-200 hover:scale-[1.02]"
-      style="background: var(--slate-wash); color: var(--slate)">
-      <span class="text-[10px]">↗</span>
-      <span class="truncate max-w-[180px]">{{ source.title }}</span>
-    </a>
+    <template v-for="(source, i) in sources" :key="i">
+      <!-- 文档片段没有可点击的 URL：渲染成标签而不是 <a href="">，
+           后者看起来可点、点了却什么也不会发生。 -->
+      <a v-if="source.link" :href="source.link" target="_blank"
+        :ref="el => { if (el) sourceRefs[i] = el as HTMLElement }"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all duration-200 hover:scale-[1.02]"
+        style="background: var(--slate-wash); color: var(--slate)">
+        <span class="text-[10px]">↗</span>
+        <span class="truncate max-w-[180px]">{{ source.title }}</span>
+      </a>
+      <span v-else
+        :ref="el => { if (el) sourceRefs[i] = el as HTMLElement }"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all duration-200 hover:scale-[1.02]"
+        style="background: var(--slate-wash); color: var(--slate)">
+        <span class="text-[10px]">§</span>
+        <span class="truncate max-w-[220px]" :title="source.snippet">{{ source.title }}</span>
+      </span>
+    </template>
   </div>
 </template>
 

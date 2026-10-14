@@ -48,6 +48,13 @@ export interface ConversationDetail {
     role: string
     content: string
     source_type: string | null
+    /** 引用溯源：检索命中的片段（后端 source_data 解析而来） */
+    sources?: Array<{
+      doc_id: string
+      chunk: string
+      source: string
+      score: number
+    }>
     created_at: string | null
   }[]
 }

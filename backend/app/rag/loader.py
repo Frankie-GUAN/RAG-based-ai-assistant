@@ -26,7 +26,13 @@ def load_file(file_path: Path) -> List[Document]:
         loader = TextLoader(str(file_path), autodetect_encoding=True)
     else:
         raise ValueError(f"Unsupported file type: {suffix}")
-    return loader.load()
+    documents = loader.load()
+    # PyPDFLoader / TextLoader 把 metadata["source"] 设成**绝对路径**。它会一路流到
+    # 两个不该看到的地方：前端把source 当标题渲染，以及检索结果作为上下文发给
+    # LLM —— 等于把自己的目录结构交给模型。统一降级成文件名。
+    for document in documents:
+        document.metadata["source"] = file_path.name
+    return documents
 
 
 def split_documents(documents: List[Document]) -> List[Document]:
