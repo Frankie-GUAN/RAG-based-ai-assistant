@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agent.core import AgentDeps, AgentTask, run_agent_stream
 from app.agent.llm import get_chat_model
-from app.agent.protocol import FinalEvent, ToolResultEvent
+from app.agent.protocol import CitationEvent, FinalEvent
 from app.mcp.client import MCPToolClient
 from app.services.chat_service import build_context_engine
 
@@ -26,10 +25,10 @@ async def _run_query(
 ) -> tuple[str, str]:
     """跑一次问答，返回 (答案, 检索到的上下文)。
 
-    **上下文口径（重要）：** 忠实度判官本应吃「真正进入 prompt 的检索片段」。
-    P0 的 Agent Core 只发出 5 种事件，其中不含引用溯源，因此这里用工具返回的
-    data 近似。将来给 Core 加上引用溯源时，必须同步复核此处的口径，
-    否则 faithfulness 分数的含义会悄悄漂移。
+    **上下文口径：** 忠实度判官吃的是 `CitationEvent` 的片段，即真正作为工具结果
+    进入模型上下文的那些段落。此前这里用 `ToolResultEvent.data` 近似，而那份数据
+    是整个检索工具的原始返回；Core 加入引用事件后，口径已经可以对齐，忠实度分数
+    的含义不再需要打折扣。
     """
     answer = ""
     retrieved: list[str] = []
@@ -43,41 +42,12 @@ async def _run_query(
             max_iterations=max_iterations,
         ),
     ):
-        if isinstance(event, ToolResultEvent) and event.ok and event.data:
-            retrieved.append(_flatten(event.data))
+        if isinstance(event, CitationEvent) and event.chunk:
+            retrieved.append(event.chunk)
         elif isinstance(event, FinalEvent):
             answer = event.answer
 
     return answer, "\n\n".join(retrieved)
-
-
-def _flatten(data: Any) -> str:
-    """把工具返回的结构化片段压成判官可读的文本。
-
-    **先拆信封。** `ToolResultEvent.data` 是完整信封 `{"ok", "data", "error"}`
-    （见 `app/mcp/client.py` 的 `MCPToolClient.call`），工具真正的载荷在
-    `payload["data"]` 里。照着 `str(data)` 压平的话，判官拿到的会是带 ok/error
-    元数据的信封 repr，而不是检索片段 —— 分数照样出得来，但含义已经不是
-    「回答是否基于上下文」了。
-
-    下面这个判别式与客户端的**逐字相同**，这是刻意的（那份判别式是线上契约），
-    但它现在存在于两处，任何一侧改动都可能让另一侧静默漂移：该判别式是
-    **失败开放**的，多一个键就不再命中，信封会被当成普通 dict 压平。
-    """
-    if isinstance(data, dict) and set(data) == {"ok", "data", "error"}:
-        data = data["data"]
-
-    if isinstance(data, list):
-        parts = []
-        for item in data:
-            if isinstance(item, dict):
-                parts.append(str(item.get("content") or item.get("snippet") or item))
-            else:
-                parts.append(str(item))
-        return "\n\n".join(parts)
-    if isinstance(data, dict):
-        return str(data.get("content") or data)
-    return str(data)
 
 
 async def _score(chain, payload: dict) -> float:
