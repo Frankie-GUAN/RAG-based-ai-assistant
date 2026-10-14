@@ -11,10 +11,10 @@
     @drop.prevent="handleDrop"
     @click="triggerInput"
   >
-    <input ref="fileInput" type="file" accept=".pdf,.txt" class="hidden" @change="handleFileChange" />
+    <input ref="fileInput" type="file" accept=".pdf,.txt,.md,.markdown,.docx" class="hidden" @change="handleFileChange" />
     <div v-if="!filename" class="flex flex-col items-center">
       <p class="text-5xl mb-4" style="font-family: var(--font-display); color: var(--clay)">+</p>
-      <p class="text-sm font-medium">Drop PDF or TXT files here</p>
+      <p class="text-sm font-medium">Drop PDF, TXT, Markdown or DOCX files here</p>
       <p class="text-xs mt-1.5" style="color: var(--ink-faint)">or click to browse</p>
     </div>
     <p

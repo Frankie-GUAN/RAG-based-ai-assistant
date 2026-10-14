@@ -25,6 +25,10 @@ langchain-community==0.4.1
 langchain-huggingface==1.2.2
 langchain-openai==1.2.1
 langgraph==1.1.10
+# 代码直接依赖 MarkdownHeaderTextSplitter 的 API，而这个类的构造函数与方法名在
+# 小版本间改过（headers_to_metadata → headers_to_split_on、且要求传元组列表；
+# split_documents → 只有 split_text）。钉死它，升级时才有对照物。
+langchain-text-splitters==1.1.2
 
 # MCP 工具协议。类名是 MCPServer 而非 FastMCP，2.x 字段全snake_case ——
 # 见 docs/tech-notes/verified-facts.md
@@ -38,6 +42,9 @@ rank-bm25==0.2.2
 jieba==0.42.1
 sentence-transformers==5.5.0
 pypdf==6.11.0
+# .docx 解析。langchain-community 0.4 不再提供 Docx2txtLoader（已拆到
+# langchain-classic），所以直接用 docx2txt，见 rag/loader.py 的 _Docx2txtLoader。
+docx2txt==0.8
 # transformers / huggingface_hub 走 requests 下载模型，而 Windows 上的 venv 常常
 # 没有可用的 CA 证书，报 CERTIFICATE_VERIFY_FAILED（pip 自己的证书链是够的，
 # 于是出现「pip 能装、HuggingFace 却下不动」这种错觉）。certifi 补上这条链。

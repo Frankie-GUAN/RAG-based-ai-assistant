@@ -29,13 +29,13 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.rag.bm25_index import BM25Index
-from app.rag.loader import load_file, split_documents
+from app.rag.loader import load_file, split_documents, supported_suffixes
 from app.rag.vector_store import add_documents
 
 logger = logging.getLogger(__name__)
 
-# 支持的扩展名，与 rag/loader.py 的 load_file 保持一致
-_SUFFIXES = {".pdf", ".txt"}
+# 支持的扩展名与 loader 保持一致（.pdf/.txt/.md/.markdown/.docx）—— 直接问
+# loader，不要在这里抄一份：抄的副本一定会先于真正的支持列表漂移。
 
 
 @dataclass
@@ -83,12 +83,12 @@ def reingest_uploads(fresh: bool = False) -> IngestReport:
     upload_dir: Path = settings.upload_dir
     files = sorted(
         p for p in upload_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in _SUFFIXES
+        if p.is_file() and p.suffix.lower() in set(supported_suffixes())
     ) if upload_dir.exists() else []
 
     if not files:
         raise RuntimeError(
-            f"{upload_dir} 下没有可入库的文件（支持 {', '.join(sorted(_SUFFIXES))}）"
+            f"{upload_dir} 下没有可入库的文件（支持 {', '.join(supported_suffixes())}）"
         )
 
     all_chunks: list[Document] = []
