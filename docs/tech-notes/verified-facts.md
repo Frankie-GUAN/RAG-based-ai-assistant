@@ -14,7 +14,7 @@
 | 依赖版本 | 已在 `requirements.txt` 全部钉死（`==`）。2026-10-14 之前全是 `>=`，两天内因此出了两次事故（见 §5） |
 | pytest | 已装。默认 `addopts` 排除 `requires_model` 标记的用例（见 pytest.ini） |
 | anyio | 异步测试用 `@pytest.mark.anyio` + `conftest.py` 的 module 级 `anyio_backend` fixture，无需 pytest-asyncio |
-| 测试规模 | `pytest tests/ -q` → **112 passed, 1 deselected**，约 25~65 秒（收集阶段要加载 chroma/torch） |
+| 测试规模 | `pytest tests/ -q` → **144 passed, 1 deselected**，约 20~30 秒（收集阶段要加载 chroma/torch） |
 | 模型 | BGE-M3 本地在 `data/models/BAAI/bge-m3`；**精排模型本地没有**（下载失败，见 §5.3），检索自动退回 RRF 顺序 |
 | 未安装的依赖 | `google-search-results` 没装 → `search_web` 一调就失败。要联网搜索先 `pip install google-search-results==2.4.2` |
 | 测试分级 | 自包含可裸跑：test_hybrid_search / test_bm25_tokenize / test_reranker_wiring / test_reranker_availability / test_citations / test_message_order / test_retrieval_singletons / test_ingest；需要 MySQL：test_chat_api；需要真实 key：test_agent（已删）；需要 2GB 模型：test_reranker（`-m requires_model`） |
@@ -93,16 +93,16 @@ cd backend
 
 | # | 问题 | 说明 / 建议 |
 |---|---|---|
-| 1 | **会话摘要一次性** | `conversation_service.get_conversation_with_context` 只在 `summary` 为空时摘要一次，之后永不更新：窗口=10 时第 11 条触发摘要（只覆盖第 1 条），此后第 2..N-10 条既不在摘要也不在窗口，静默丢失。修法见原 P0 计划 Task 9（需要 `summary_upto_message_id` 水位线列 + 幂等列检查 `app/db/migrate.py`） |
-| 2 | **评测页仍挂在主导航** | 个人使用场景下它对用户零价值；且 Judge 无评分锚点、打分失败被静默计为 0 分（`evaluation_service._score`）。建议移出导航、只留 CLI + Golden Set |
-| 3 | **BM25 小语料陷阱** | `idf` 只在 `df < N/2` 时为正，语料 ≤2 篇时**任何查询都返回空**。这是数学不是 bug。换 `BM25Plus` 可解（未做） |
-| 4 | 精排模型本地缺失 | 下载因 SSL 证书校验失败；已装 `certifi`，但本机仍下不动（疑似无外网）。要用精排就把模型放进 `data/models/BAAI/bge-reranker-v2-m3`，否则保持自动降级 |
-| 5 | Chroma 与 BM25 之间无事务 | 写 Chroma 成功、写 BM25 失败会留下分叉，且此时 `DocumentModel` 行尚未插入，无从对账 |
-| 6 | `torch` 未钉版本 | 它是 sentence-transformers 的传递依赖、体积大且平台相关；Docker 镜像里装到的版本可能与本机不同 |
-| 7 | 重复上传同一文件会重复入库 | Chroma 与 BM25 双向都会再加一遍，无去重。`ingest --fresh` 可清掉重复 |
-| 8 | `langchain_community.vectorstores.Chroma` 已弃用 | 官方建议迁移到 `langchain-chroma` 包（未迁） |
-| 9 | 无认证与用户隔离 | `/api/conversations` 返回全库会话，任何人都能消耗 DeepSeek 额度。个人自用可接受 |
-| 10 | 仓库无 CI | 测试要手动跑。`.github/` 下只有 copilot 的模板配置（已删），没有 workflow |
+| 1 | **BM25 小语料陷阱** | `idf` 只在 `df < N/2` 时为正，语料 ≤2 篇时**任何查询都返回空**。这是数学不是 bug。换 `BM25Plus` 可解（未做） |
+| 2 | 精排模型本地缺失 | HuggingFace 下载失败；已装 `certifi` 但本机仍下不动（疑似无外网）。把模型放进 `data/models/BAAI/bge-reranker-v2-m3` 即启用，否则保持自动降级 |
+| 3 | Chroma 与 BM25 之间无事务 | 写 Chroma 成功、写 BM25 失败会留下分叉，且此时 `DocumentModel` 行尚未插入，无从对账。`remove_source` 与删除已尽量缩小窗口，但跨存储原子性未解决 |
+| 4 | `tools/document_parser.parse_document`（MCP 工具）不建 `DocumentModel` 行 | 经 API 上传会建行，经 MCP 工具解析不会。因此这类片段无法从 UI 删除。工具需要 DB session 才能修，未做 |
+| 5 | `torch` 未钉版本 | 它是 sentence-transformers 的传递依赖、体积大且平台相关；Docker 镜像里装到的版本可能与本机不同 |
+| 6 | `langchain_community.vectorstores.Chroma` 已弃用 | 官方建议迁移到 `langchain-chroma` 包（未迁） |
+| 7 | 来源名带 uuid 后缀 | `metadata["source"]` 用的是存储文件名（`原始名_uuid8位.扩展名`），因为它是删除/去重时与 Chroma、BM25 对得上的键。代价是界面上的来源名不够干净 |
+| 8 | 无认证与用户隔离 | `/api/conversations` 返回全库会话，任何人都能消耗 DeepSeek 额度。个人自用可接受 |
+| 9 | 仓库无 CI | 测试要手动跑 |
+| 10 | 答案正文没有 `[1][2]` 引用角标 | 来源以标签形式展示在答案下方；正文内联角标未做（认为标签够用） |
 
 ## 7. 其他容易踩的点（血泪）
 
