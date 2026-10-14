@@ -103,7 +103,7 @@ def test_fresh_moves_the_old_chroma_dir_instead_of_deleting(uploads, fake_embedd
 
 def test_refuses_to_run_with_no_uploadable_files(uploads):
     # 注意用 .exe 而不是 .md：Markdown 已经是支持格式了
-    (uploads / "tool.exe").write_bytes(b"MZ", encoding="latin-1")
+    (uploads / "tool.exe").write_bytes(b"MZ")
 
     with pytest.raises(RuntimeError, match="没有可入库的文件"):
         ingest_mod.reingest_uploads()
