@@ -5,6 +5,7 @@ import threading
 import time
 from typing import List, Tuple
 
+import jieba
 from langchain_core.documents import Document
 from rank_bm25 import BM25Okapi
 
@@ -14,6 +15,20 @@ logger = logging.getLogger(__name__)
 
 # 加载失败后的重试间隔。见 get_bm25_index()。
 _RETRY_INTERVAL_SECONDS = 30.0
+
+# jieba 首次加载会往 stderr 打「Building prefix dict… / Loading model cost…」。
+# 那是一次性的库初始化噪声，与应用日志混在一起只会干扰排查。
+jieba.setLogLevel(logging.WARNING)
+
+# 刻意保持很小的停用词表：只收纯功能词。BM25 的 IDF 本来就靠「在多数文档里出现」
+# 压制高频词，这份表只需挡掉那些几乎不携带区分度的词。收录「不」「没有」这类
+# 有语义否定作用的词会误伤检索结果。
+_STOPWORDS = frozenset("""
+的 了 和 是 就 都 而 及 与 着 或 一个 没有 我们 你们 他们 她们 它们
+这个 那个 之 也 在 有 不 人 你 我 他 她 它 但 但是 因为 所以 如果 虽然
+可以 需要 什么 怎么 这样 那样 吗 呢 吧 啊 呀 哦 嗯 请 帮 一下 一些
+时候 觉得 应该 可能 以及 或者 关于 对于 通过 进行 由于 因此
+""".split())
 
 
 class BM25Index:
@@ -29,9 +44,31 @@ class BM25Index:
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
-        import re
+        """中文用 jieba 切词，英文数字按原样保留。
 
-        return [t.lower() for t in re.findall(r"[一-鿿]|[a-zA-Z0-9]+", text)]
+        **为什么不用单字切分。** 旧实现用 `re.findall(r"[一-鿿]|...")` 把中文切成
+        单字。那会让「劳动合同」变成「劳/动/合/同」：查询侧若也按单字切，双方都退化
+        成「字的命中」，「的/了/是」这类高频字主导打分，而「劳动/合同」这类真正携带
+        区分度的二元词被拆散 —— BM25 最擅长的精确匹配正好是被这一步毁掉的。
+
+        `lcut_for_search`（搜索模式）比 `cut` 更适合检索：它同时产出较长的复合词
+        与其组成部分，既提高命中又不漏召回。
+
+        **磁盘上的旧索引与本函数不兼容。** pickle 里存的是**已分词**的语料，改分词器
+        不会让旧文件失效、只会让它变成「新词切法查旧字粒度」的静默错误（查「劳动合同」
+        在按单字索引的旧文档上命中不了）。换分词器后必须跑
+        `python -m app.rag.bm25_index rebuild` 从 Chroma 全量重建。
+        """
+        tokens: List[str] = []
+        for token in jieba.lcut_for_search(text.lower()):
+            token = token.strip()
+            if not token or token in _STOPWORDS:
+                continue
+            # 丢掉纯标点/空白：jieba 会把它们单独切出来，而 BM25 不该为它们分配权重。
+            if not any(ch.isalnum() for ch in token):
+                continue
+            tokens.append(token)
+        return tokens
 
     def build(self, documents: List[Document]) -> None:
         corpus = [self._tokenize(doc.page_content) for doc in documents]
@@ -160,3 +197,64 @@ def get_bm25_index() -> BM25Index:
             ):
                 _bm25.load()
     return _bm25
+
+
+def rebuild_from_chroma() -> int:
+    """从 Chroma 全量重建 BM25 索引，返回重建的片段数。
+
+    这条路径的存在理由：BM25 索引是**缓存**，Chroma 才是检索事实的来源。此前仓库
+    里没有从 Chroma 重建的路径，于是 `BM25 索引是可重建的缓存` 只是句空头支票 ——
+    索引真坏掉时，除了手工 pickle 没有别的办法把它救回来。
+
+    两种必须重建的情形：
+
+    1. **分词器变更**。索引里存的是已分词的语料，改 `_tokenize` 不会让旧 pickle
+       失效，只会让它变成「新切法查旧粒度」的静默错误。
+    2. **索引缺失或损坏**。此时 Chroma 里的文档仍然完好，应当能从它恢复。
+
+    `save(force=True)`：重建意味着内存里的集合就是完整集合，因此可以合法覆盖磁盘，
+    并顺带清掉 `_load_failed` 标志（这是该标志唯一的自愈入口）。
+    """
+    # 局部导入：vector_store 会 import 配置与 langchain_community，而 bm25_index
+    # 被检索栈的其他模块导入，放成顶层容易把导入顺序绑死。
+    from app.rag.vector_store import get_vectorstore
+
+    vectorstore = get_vectorstore()
+    if vectorstore is None:
+        raise RuntimeError("Chroma 索引不存在，无法重建（先上传文档或确认 data/chroma）")
+
+    raw = vectorstore.get(include=["documents", "metadatas"])
+    documents = [
+        Document(page_content=text, metadata=metadata or {})
+        for text, metadata in zip(raw.get("documents") or [], raw.get("metadatas") or [])
+        if text
+    ]
+    if not documents:
+        raise RuntimeError("Chroma 中没有可重建的片段（返回 0 条）")
+
+    index = get_bm25_index()
+    index.build(documents)
+    index.save(force=True)
+    logger.info("BM25 索引已从 Chroma 重建：%d 个片段", len(documents))
+    return len(documents)
+
+
+def main() -> None:
+    """运维入口：python -m app.rag.bm25_index rebuild"""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="BM25 索引维护")
+    parser.add_argument("command", choices=["rebuild"], help="rebuild = 从 Chroma 全量重建")
+    args = parser.parse_args()
+
+    if args.command == "rebuild":
+        count = rebuild_from_chroma()
+        print(f"已重建 {count} 个片段")
+        return
+
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

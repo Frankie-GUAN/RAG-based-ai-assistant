@@ -17,6 +17,7 @@ mcp==2.2.0
 # 检索
 chromadb>=1.0.0
 rank-bm25>=0.2.2
+jieba>=0.42.1
 sentence-transformers>=3.0.0
 pypdf>=4.0.0
 
