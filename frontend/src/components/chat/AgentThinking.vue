@@ -15,12 +15,16 @@ import { gsap } from '../../composables/useGSAP'
 
 const props = defineProps<{ route: string; isStreaming: boolean }>()
 const label = computed(() => {
+  // 旧的三个取值来自已被删除的路由分类（web / rag / direct）。ReAct 路径下
+  // currentRoute 传的是已经本地化的状态文案（「调用工具：search_documents」等），
+  // 所以查不到映射时应当原样显示，而不是退化成一句永远不变的 "Thinking…" ——
+  // 那会让整个执行过程在界面上完全不可见。
   const m: Record<string, string> = {
     web: 'Searching the web…',
     rag: 'Reading your documents…',
     direct: 'Reasoning…',
   }
-  return m[props.route] || 'Thinking…'
+  return m[props.route] || props.route || 'Thinking…'
 })
 
 const dot1 = ref<HTMLElement | null>(null)

@@ -41,6 +41,13 @@
             </p>
           </div>
 
+          <!-- Error -->
+          <div v-if="streamError" class="py-4">
+            <div class="rounded-xl px-4 py-3 text-sm" style="background: var(--clay-wash); color: var(--clay)">
+              <span class="font-semibold">出错了：</span>{{ streamError }}
+            </div>
+          </div>
+
           <!-- Bottom spacer for scroll comfort -->
           <div class="h-10"></div>
         </div>
@@ -88,7 +95,7 @@ import ChatInput from '../components/chat/ChatInput.vue'
 import AgentThinking from '../components/chat/AgentThinking.vue'
 import ConversationSidebar from '../components/chat/ConversationSidebar.vue'
 
-const { messages, isStreaming, currentRoute, streamingContent, sendMessage, loadConversationHistory, clearMessages } = useChat()
+const { messages, isStreaming, currentRoute, streamingContent, streamError, sendMessage, loadConversationHistory, clearMessages } = useChat()
 const { fetchConversations, deleteConversation, renameConversation } = useConversations()
 const store = useChatStore()
 const msgContainer = ref<HTMLElement>()
@@ -151,7 +158,7 @@ watch(streamingContent, async (val) => {
 
 async function handleSend(text: string) {
   const history = messages.slice(-6).map(m => ({ role: m.role, content: m.content }))
-  await sendMessage(text, history, false)
+  await sendMessage(text, history)
 }
 
 async function onSelectConversation(id: number) {
