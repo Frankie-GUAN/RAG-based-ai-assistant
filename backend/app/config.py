@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     upload_dir: Path = data_dir / "uploads"
     chroma_dir: Path = data_dir / "chroma"
 
+    # 上传上限（MB）。上传是流式落盘的，超限时在写入过程中就停手并删掉半成品。
+    max_upload_mb: int = 20
+
     # RAG
     chunk_size: int = 800
     chunk_overlap: int = 120

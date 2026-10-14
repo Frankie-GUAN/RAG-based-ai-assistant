@@ -191,10 +191,16 @@ def test_ensure_columns_ignores_missing_tables():
 
 
 def test_ensure_columns_covers_every_declared_column():
-    """REQUIRED_COLUMNS 与 ORM 模型不能漂移：模型加了列而清单没登记，老库照样坏。"""
+    """REQUIRED_COLUMNS 与 ORM 模型不能漂移：模型删了列而清单还留着（no-op，无害），
+    模型加了必填列而清单没登记，老库照样坏在「新建库能用、老库不报错就是不工作」上。"""
     from app.db.migrate import REQUIRED_COLUMNS
     from app.models.conversation import Conversation
+    from app.models.document import Document
 
-    model_columns = {c.name for c in Conversation.__table__.columns}
-    for _table, column, _ddl in REQUIRED_COLUMNS:
-        assert column in model_columns, f"{column} 在 ORM 里已不存在，清单该清理了"
+    models = {Conversation.__tablename__: Conversation, Document.__tablename__: Document}
+
+    for table, column, _ddl in REQUIRED_COLUMNS:
+        assert table in models, f"{table} 在模型里已不存在，清单该清理了"
+        assert column in {c.name for c in models[table].__table__.columns}, (
+            f"{table}.{column} 已不在 ORM 里，清单该清理了"
+        )

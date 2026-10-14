@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 # (表名, 列名, DDL)
 REQUIRED_COLUMNS: list[tuple[str, str, str]] = [
     ("conversations", "summary_upto_message_id", "INT NULL"),
+    # MySQL 不接受给已有列加 NOT NULL 而不给默认值，因此补列时只能给 NULL，
+    # 由应用侧把它当「未知」处理（去重时跳过空摘要的旧行，见 knowledge_service）。
+    ("documents", "content_hash", "VARCHAR(64) NULL"),
 ]
 
 

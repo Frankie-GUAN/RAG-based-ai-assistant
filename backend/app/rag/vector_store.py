@@ -67,3 +67,26 @@ def add_documents(documents: List[Document]) -> Chroma:
         raise RuntimeError("Failed to create the vector store")
     vectorstore.add_documents(documents)
     return vectorstore
+
+
+def delete_by_source(source: str) -> int:
+    """删除某个来源的全部向量，返回删除条数。
+
+    按 metadata 的 `source` 过滤，而不是按 id 列表：`add_documents` 不保留
+    「哪些 id 属于哪个文档」的映射（id 由 Chroma 内部生成），而 source 是入库时
+    打在每个 chunk metadata 上的字段，是唯一可靠的关联键。
+
+    先取 id 再删（而不是直接 `delete(where=...)`）是为了拿到真实删除条数：
+    「删了 0 条」与「删了 12 条」在响应上必须能区分，否则删错文件也表现为成功。
+    """
+    vectorstore = get_vectorstore()
+    if vectorstore is None:
+        return 0
+
+    got = vectorstore.get(where={"source": source}, include=[])   # 只要 id
+    ids = list(got.get("ids") or [])
+    if not ids:
+        return 0
+
+    vectorstore.delete(ids=ids)
+    return len(ids)

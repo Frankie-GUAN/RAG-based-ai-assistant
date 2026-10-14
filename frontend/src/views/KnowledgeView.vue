@@ -8,6 +8,12 @@
       <!-- Upload -->
       <FileUploader :is-uploading="isUploading" @upload="handleUpload" />
 
+      <!-- Error -->
+      <p v-if="error" class="mt-4 text-sm rounded-xl px-4 py-3"
+        style="background: var(--clay-wash); color: var(--clay)">
+        {{ error }}
+      </p>
+
       <!-- Document list — 2-column grid -->
       <section class="mt-12">
         <h2 class="text-xs uppercase tracking-widest mb-6" style="color: var(--ink-muted); font-family: var(--font-body)">
@@ -25,11 +31,20 @@
               <p class="text-sm font-semibold truncate">{{ doc.filename }}</p>
               <p class="text-xs mt-0.5" style="color: var(--ink-muted)">{{ doc.chunk_count }} chunks · {{ formatDate(doc.created_at) }}</p>
             </div>
+            <!-- 删除：索引、磁盘文件、数据库行一起清掉 -->
+            <button @click="handleDelete(doc)"
+              :disabled="deletingIds.has(doc.id)"
+              :title="`删除 ${doc.filename}`"
+              class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed"
+              style="color: var(--ink-faint); background: transparent">
+              <span v-if="deletingIds.has(doc.id)">···</span>
+              <span v-else>✕</span>
+            </button>
           </div>
         </div>
         <div v-if="!documents.length" class="text-center py-20" style="color: var(--ink-faint)">
           <p class="text-4xl mb-4 opacity-20">⧉</p>
-          <p class="text-sm">No documents yet. Upload a PDF or TXT file above.</p>
+          <p class="text-sm">No documents yet. Upload a PDF, TXT, MD or DOCX file above.</p>
         </div>
       </section>
     </div>
@@ -42,7 +57,7 @@ import { useKnowledge } from '../composables/useKnowledge'
 import FileUploader from '../components/knowledge/FileUploader.vue'
 import { gsap, ScrollTrigger } from '../composables/useGSAP'
 
-const { documents, isUploading, upload, fetchDocuments } = useKnowledge()
+const { documents, isUploading, deletingIds, error, upload, fetchDocuments, deleteDocument } = useKnowledge()
 const containerRef = ref<HTMLElement | null>(null)
 let ctx: gsap.Context | null = null
 
@@ -81,5 +96,12 @@ onUnmounted(() => {
 })
 
 async function handleUpload(file: File) { await upload(file) }
+
+/** 删除前确认：这份文档的索引会一起消失，撤不回来。 */
+async function handleDelete(doc: { id: number; filename: string }) {
+  if (!window.confirm(`删除「${doc.filename}」？\n\n它的全部检索片段会同时从索引和磁盘移除，无法撤销。`)) return
+  await deleteDocument(doc.id)
+}
+
 function formatDate(iso: string) { return new Date(iso).toLocaleDateString('zh-CN') }
 </script>

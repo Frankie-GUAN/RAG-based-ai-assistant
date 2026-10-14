@@ -104,6 +104,26 @@ class BM25Index:
         max_score = scores[ranked[0][0]] if ranked and scores[ranked[0][0]] > 0 else 1.0
         return [(documents[i], score / max_score) for i, score in ranked if score > 0]
 
+    def remove_source(self, source: str) -> int:
+        """把某个来源的全部片段移出索引，返回移除条数。
+
+        删除文档时必须走这里而不是「重建整个索引」：重建的输入是 Chroma，
+        而 Chroma 与 BM25 之间没有事务（见 add 的说明），此刻两边可能已经不一致，
+        拿 Chroma 覆盖 BM25 会把 BM25 独有的片段悄悄抹掉。
+
+        与 add 一样受 _write_lock 保护，且**在降级状态下拒绝执行**：
+        此时内存里是空索引，「删掉某个来源」会变成「清空全部」。
+        """
+        with self._write_lock:
+            documents, index = self._pair
+            kept = [doc for doc in documents if (doc.metadata or {}).get("source") != source]
+            removed = len(documents) - len(kept)
+            if removed == 0:
+                return 0
+            self.build(kept)
+            self.save()
+            return removed
+
     def save(self, force: bool = False) -> None:
         """先写同目录下的临时文件，再 os.replace() 换上去。
 
