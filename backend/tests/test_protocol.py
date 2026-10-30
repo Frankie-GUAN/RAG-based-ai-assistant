@@ -22,6 +22,13 @@ EXPECTED_EVENT_TYPES = {
     "citation",
     "final",
     "error",
+    # 迁移到 StateGraph 后新增：规划决策与自检结论。
+    # 两者都有真实生产者（nodes.plan / nodes.reflect 各写一次），
+    # 符合本模块「不留无生产者的类型」的原则。
+    "plan",
+    "reflect",
+    # 三层记忆：语义缓存命中。生产者是 chat_service 的缓存分支。
+    "cache_hit",
 }
 
 

@@ -17,10 +17,10 @@ from app.api.conversations import router as conversations_router
 from app.mcp.client import open_tool_client
 from app.mcp.server import mcp_server
 
-import app.models.conversation  # noqa: F401
-import app.models.message       # noqa: F401
-import app.models.document      # noqa: F401
-import app.models.evaluation    # noqa: F401
+# 统一在 app.models 里 import 全部模型：既保证 Base.metadata 完整
+# （create_all 才建得出全部表），也保证 SQLAlchemy mapper 的外键解析
+# 不会因为「只导入了部分模型」而失败。
+import app.models  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
