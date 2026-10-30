@@ -48,11 +48,17 @@ Vue 3 单页应用 → FastAPI → LangGraph Agent → 混合检索 → ChromaDB
 ### 请求链路
 
 `app/api/chat.py` 的 `POST /api/chat/stream` → `app/services/chat_service.py` 的 `stream_agent()`
-→ `app/agent/core.py` 的 `run_agent_stream()`（ReAct 循环，`model.astream()` 边生成边外发）
+→ `app/agent/core.py` 的 `run_agent_stream()`（编译好的 StateGraph，图在 `app/agent/graph.py`，
+   节点在 `app/agent/nodes.py`）→ 六节点：`plan → retrieve → agent ⇄ tools → reflect → answer`
 → `app/mcp/client.py` 的 `MCPToolClient` → `app/mcp/server.py` 的工具实现 → `app/rag/`。
 
 事件流是这条链路的骨架：`token` / `tool_call` / `tool_result` / `citation` / `final` / `error`，
-定义在 `app/agent/protocol.py`，`api/chat.py` 只做转发与落库。
+以及 Agent 图与三层记忆新增的 `plan` / `reflect` / `cache_hit`，全部定义在 `app/agent/protocol.py`。
+`api/chat.py` 只做转发与落库。
+
+节点内用 `get_stream_writer()` 写 `event.to_dict()`，外层用
+`astream(stream_mode="custom")` 接收后再 `event_from_dict()` 还原成事件对象——
+这是「迁移到 LangGraph 但前端零改动」的关键。
 **2026-10-14 起本链路已跑通**（此前 `chat.py` 调用的 `run_agent` 在 ReAct 改造后已不存在，`app.main` 不可导入）。
 
 工具层是真 MCP：`mcp==2.2.0`，`MCPServer` 与 `MCPToolClient` 同进程经 `InMemoryTransport` 连接，
@@ -133,10 +139,13 @@ BM25 索引加载失败时**降级而不是崩溃**，但要理解这套语义�
 
 - `config.py` 暴露一个 `settings` 单例（pydantic-settings，读取**仓库根目录**的 `.env`）。
   `embed_model_path` / `reranker_model_path` 会优先使用 `data/models/` 下的本地副本，找不到才回退到
-  HuggingFace 模型 id。**目前只有 bge-m3 有本地副本**，精排模型没有，因此精排恒定降级为 RRF 顺序。
-- 历史压缩是**一次性的**（`conversation_service.get_conversation_with_context` 只在
-  `Conversation.summary` 为空时摘要一次，然后永久缓存）—— 这是已知缺陷，修法见旧 P0 计划 Task 9。
-- `api/chat.py` 不信任客户端传来的 `has_docs`，该字段已删除：ReAct 下由模型自主决定是否检索。
+  HuggingFace 模型 id。**两个模型都已有本地副本**（`data/models/BAAI/` 下，各约 2GB），
+  精排已实际生效。`ENABLE_RERANKER=false` 可关闭；模型缺失时才会降级为 RRF 顺序。
+- 历史压缩是**滚动增量**的：用 `Conversation.summary_upto_message_id` 水位线记录摘要覆盖到哪一条，
+  每次只合并「新滑出窗口」的那批消息；摘要失败时不推进水位线，下轮重试。
+  旧实现只在摘要为空时摘要一次，导致窗口外的中间消息既不进摘要也不在窗口里，静默丢失。
+- 是否检索**不再由客户端传参决定**（`has_docs` 已删除）：先由 `plan` 节点判定，
+  判定需要检索就直接跑 `retrieve`；不需要则直接进 `agent`。模型仍可在推理中自主调工具。
 
 ### 前端结构
 
@@ -153,21 +162,20 @@ GSAP 动画统一使用同一套写法：模块作用域的 `let ctx`，`onMount
 
 样式是 Tailwind v4 的 CSS-first 方式 —— `src/styles/main.css` 首行是 `@import "tailwindcss"`，**没有 `tailwind.config.js`**。设计 token 是手写在 `:root` 里的 CSS 变量（`--paper`、`--ink`、`--clay`、`--r-md` 等），通过 `style="color: var(--ink)"` 使用，并与真正的 Tailwind 工具类混用。
 
-## 当前工作：个人知识库方向（2026-10-14 起）
+## 当前定位（2026-10-30 起）
 
-本仓库定位为**个人使用的知识库问答助手**（直播主播经营 Agent 平台已另立项目，其 PRD 已从本仓库移除）。
-动手改代码前请先读这两份文档：
+本仓库定位为**面向业务文档的 Agentic RAG 问答平台**——答案可溯源到章节、检索质量可对照验证、
+多轮对话有跨会话记忆。（直播主播经营 Agent 平台已另立项目。）
 
-- `docs/tech-notes/verified-facts.md` —— **改代码前必查**：本机实测过的技术前提
-  （含 pyarrow/torch 加载顺序这个会段错误的坑、MCP 2.2.0 的类名与字段、pickle 兼容性），
-  以及带行号的已确认缺陷清单与已知未修项。
-- `docs/plans/2026-10-14-personal-kb-revival.md` —— 当前计划。P0（检索质量、Docker）与
-  P1（真流式、引用溯源、前端错误处理）已交付；P2（滚动摘要、评估收尾、知识库管理、
-  解析增强）待排期。
+动手改代码前先读 `docs/tech-notes/verified-facts.md`：本机实测过的技术前提
+（含 pyarrow/torch 加载顺序这个会段错误的坑、MCP 2.2.0 的类名与字段）、
+带行号的已确认缺陷，以及每次改造的实测数据（§9 检索修复 / §10 LangGraph 迁移 / §11 三层记忆）。
 
-旧计划 `docs/superpowers/plans/2026-09-10-p0-agent-core-foundation.md` 的 Task 1–7 已交付、
-Task 8（真流式）已由新计划吸收；**Task 9（滚动增量摘要）与 Task 10（评测收尾）仍然有效**，
-它们的规格是现成的，重做时照着那份计划走即可。
+> ⚠️ **`docs/` 目录未纳入版本控制**（`.gitignore` 第 30 行）。它在本地可用，
+> 但 GitHub 上不存在——所以 README 里不要引用 docs 下的路径，否则是死链。
+
+已完成的能力改动详见 `docs/plans/2026-10-30-job-alignment-redesign.md`。
+2026-10 之前的设计与实施计划已归档删除（任务全部完成或被吸收）。
 
 ### 环境上的硬前提（踩过才知道）
 
