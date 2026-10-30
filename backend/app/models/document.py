@@ -16,4 +16,8 @@ class Document(Base):
     # 按内容去重，所以没有这一列就只能靠文件名猜。索引见 app/db/migrate.py：
     # create_all 不会给已存在的表加列，老库必须靠 ensure_columns 补。
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    # 软删除标记。见 services/knowledge_service.delete_document：
+    # 直接删 Chroma 里的向量会毁掉整个 HNSW 段（实测三轮皆坏，隔离环境复现不了），
+    # 所以向量侧只标记不删，靠检索过滤 + 索引重建清除。
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

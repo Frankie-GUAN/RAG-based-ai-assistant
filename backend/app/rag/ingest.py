@@ -29,6 +29,7 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.rag.bm25_index import BM25Index
+from app.rag.exclusive import ensure_exclusive_access
 from app.rag.loader import load_file, split_documents, supported_suffixes
 from app.rag.vector_store import add_documents
 
@@ -133,6 +134,8 @@ def main() -> None:
         help="先把现有 Chroma 目录改名备份（索引重复或有旧格式残留时使用）",
     )
     args = parser.parse_args()
+
+    ensure_exclusive_access("app.rag.ingest")
 
     print(f"扫描 {settings.upload_dir} …", flush=True)
     report = reingest_uploads(fresh=args.fresh)

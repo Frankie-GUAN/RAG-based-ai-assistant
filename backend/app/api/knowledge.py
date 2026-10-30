@@ -56,9 +56,10 @@ async def get_documents(db: Session = Depends(get_db)):
 
 @router.delete("/documents/{document_id}")
 async def delete_document_by_id(document_id: int, db: Session = Depends(get_db)):
-    """删除文档：索引、磁盘文件与数据库行一并清理。
+    """删除文档：对用户立即生效（界面消失、检索不再命中、磁盘文件清除）。
 
-    同步执行同样挪进线程池 —— 删除要读写 Chroma 与 BM25 并落盘。
+    向量索引里的片段保留到下一次 `app.rag.ingest --fresh` 重建为止 —— 就地删向量
+    会毁掉整个 HNSW 段（实测 chromadb 1.5.9），代价是整库不可读，不值。
     """
     loop = asyncio.get_event_loop()
     doc = await loop.run_in_executor(None, delete_document, db, document_id)

@@ -134,10 +134,24 @@ export function useChat() {
 
 /** 后端引用事件 → 前端来源条目。文档片段没有 URL，只有来源与摘要。 */
 function toSource(raw: any): Source {
+  // 章节标题来自后端的 page_title / section_path（rag/slide_title.py 提取）。
+  // 只有文件名时，用户拿到一句答案也不知道它出自哪一章；
+  // 有了章节，才能真正拿去核对。
+  const pageTitle: string = raw.page_title || ''
+  const sectionPath: string[] = Array.isArray(raw.section_path) ? raw.section_path : []
+  const fileName = raw.source || '未知来源'
+
+  // 章节路径的最后一段通常就是页标题，去重后拼成「文件 › 章节」
+  const parts = [...sectionPath]
+  if (pageTitle && !parts.includes(pageTitle)) parts.push(pageTitle)
+
   return {
-    title: raw.source || '未知来源',
+    title: parts.length ? `${fileName} › ${parts.join(' › ')}` : fileName,
     link: '',
     snippet: raw.chunk,
+    // 悬停时给出完整来源信息（title 已经含章节，snippet 是原文片段）
+    sourceName: fileName,
+    section: parts.join(' › '),
   }
 }
 

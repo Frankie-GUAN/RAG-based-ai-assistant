@@ -30,6 +30,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # 这条命令只读，但「打开索引目录」本身就足以损坏它（见 exclusive.py）
+    from app.rag.exclusive import ensure_exclusive_access
+    ensure_exclusive_access("app.rag.search")
+
     if args.no_rerank:
         settings.enable_reranker = False
 

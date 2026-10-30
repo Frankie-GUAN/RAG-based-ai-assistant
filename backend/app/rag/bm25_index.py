@@ -268,6 +268,10 @@ def main() -> None:
     parser.add_argument("command", choices=["rebuild"], help="rebuild = 从 Chroma 全量重建")
     args = parser.parse_args()
 
+    # 读 Chroma 也算「打开索引目录」，同样必须独占
+    from app.rag.exclusive import ensure_exclusive_access
+    ensure_exclusive_access("bm25_index rebuild")
+
     if args.command == "rebuild":
         count = rebuild_from_chroma()
         print(f"已重建 {count} 个片段")

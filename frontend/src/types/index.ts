@@ -9,6 +9,10 @@ export interface Source {
   title: string
   link: string
   snippet?: string
+  /** 文件名（不含章节）—— 章节信息拼接进 title 后，仍需要原名做展示与去重 */
+  sourceName?: string
+  /** 章节路径，如 "Pointer Analysis: Foundations › Worklist (WL)" */
+  section?: string
 }
 
 export interface DocumentRecord {

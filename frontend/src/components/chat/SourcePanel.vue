@@ -15,7 +15,10 @@
         class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all duration-200 hover:scale-[1.02]"
         style="background: var(--slate-wash); color: var(--slate)">
         <span class="text-[10px]">§</span>
-        <span class="truncate max-w-[220px]" :title="source.snippet">{{ source.title }}</span>
+        <!-- 有章节时文件名压暗、章节突出：用户最关心的是「哪一节」 -->
+        <span v-if="source.sourceName" class="truncate max-w-[110px] opacity-60">{{ source.sourceName }}</span>
+        <span v-if="source.sourceName && source.section" class="text-[10px] opacity-40">›</span>
+        <span class="truncate max-w-[220px]" :title="source.snippet">{{ source.section || source.title }}</span>
       </span>
     </template>
   </div>

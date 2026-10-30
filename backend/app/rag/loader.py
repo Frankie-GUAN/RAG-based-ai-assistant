@@ -11,6 +11,11 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
 
 from app.config import settings
+from app.rag.slide_title import (
+    build_section_path,
+    extract_page_title,
+    render_title_prefix,
+)
 
 # 流式读写的块大小。1MB 是经验值：再大对磁盘吞吐没明显帮助，再小会增加 Python 层循环开销。
 _READ_BLOCK = 1024 * 1024
@@ -136,6 +141,11 @@ def split_documents(documents: List[Document]) -> List[Document]:
     长度切会把「## 安装依赖」和它下面的正文拦腰截断：片段既不包含标题（检索时
     不知道自己在讲什么），又横跨两节。先按标题层级拆、再对超长小节按长度细分，
     片段才能带上「我是哪一节」这个语义。
+
+    **PDF 补全幻灯片标题。** 课件类 PDF 一页一张幻灯片，正文第一行就是标题。
+    标题写进 chunk 文本后，query 的词面能直接对上——「检索得到」与「检索得准」
+    之间的差别就在这里。判定规则见 `rag/slide_title.py`，那里的原则是
+    **宁可没有标题，也不能有坏标题**（约 40% 的页首行是公式或图形残留）。
     """
     chunks: List[Document] = []
 
@@ -167,7 +177,52 @@ def split_documents(documents: List[Document]) -> List[Document]:
         )
         chunks.extend(splitter.split_documents(other_docs))
 
-    return _stamp_chunk_ids(chunks)
+    return _stamp_chunk_ids(_enrich_with_titles(chunks))
+
+
+def _enrich_with_titles(chunks: List[Document]) -> List[Document]:
+    """把幻灯片标题补进片段文本与元数据。
+
+    **只在 PDF 片段上做。** Markdown 的片段本来就带标题行（MarkdownHeaderTextSplitter
+    保留了它），再补一遍会造成重复。
+
+    **标题写进文本，不只是元数据。** 元数据不参与相似度计算，
+    放进文本才能让「worklist 算法」这类 query 在词面上直接命中。
+
+    **没抽到标题就原样放过。** 不写空字符串、不写占位符——
+    一个假的标题比没有标题更糟：它会稀释向量，还会让模型误以为
+    这一片真的属于某个章节。
+    """
+    for chunk in chunks:
+        metadata = chunk.metadata or {}
+
+        # 只处理 PDF 片段：loader 给 PDF 打了 page 字段，MD 没有
+        if metadata.get("page") is None:
+            continue
+
+        title = extract_page_title(chunk.page_content)
+        if not title:
+            continue
+
+        document_title = str(metadata.get("title") or "")
+        section_path = build_section_path(title, document_title)
+
+        # 标题已经在正文首行（提取成功即意味着首行就是它）→ 正文里已经含标题，
+        # 只补 metadata 即可，不必重复写进文本。
+        # 判定：正文首行去掉标题后还剩实质内容 → 说明标题不在正文里
+        body = chunk.page_content
+        first_line = body.splitlines()[0].strip() if body.strip() else ""
+        already_present = first_line == title
+
+        metadata["page_title"] = title
+        metadata["section_path"] = section_path
+
+        if not already_present:
+            prefix = render_title_prefix(title, section_path)
+            if prefix:
+                chunk.page_content = f"{prefix}\n\n{body}"
+
+    return chunks
 
 
 def _is_markdown(doc: Document) -> bool:
