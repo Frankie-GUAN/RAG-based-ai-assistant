@@ -14,6 +14,63 @@ def _disable_model_preload(monkeypatch):
     monkeypatch.setattr(settings, "preload_models", False)
 
 
+@pytest.fixture(autouse=True)
+def _stub_query_embedding(monkeypatch):
+    """把 query 编码换成固定向量，**不让测试碰真实模型**。
+
+    **为什么需要。** 检索链路现在用「预计算的 query 向量」做检索
+    （见 app/rag/query_cache.py，那是性能优化的关键）。
+    于是每个走检索的用例都会去调 BGE-M3 编码一条 query——
+    CPU 上要好几秒，而且让单元测试依赖一个 2GB 的模型文件。
+
+    桩函数返回**确定性**的固定向量（由 query 文本哈希生成），
+    这样：
+    - 同一个 query 永远得到同一个向量（缓存语义可测）
+    - 不同 query 得到不同向量（不会让所有检索结果都一样）
+    - 完全不碰模型
+    """
+    import hashlib
+
+    from app.rag import hybrid_search as hybrid_mod
+
+    def _fake_embed_query(query: str):
+        digest = hashlib.sha256(query.encode("utf-8")).digest()
+        return [b / 255.0 for b in digest[:1024].ljust(1024, b"\x00")]
+
+    monkeypatch.setattr(hybrid_mod, "cached_embed_query", _fake_embed_query, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _disable_query_rewrite(monkeypatch):
+    """默认关掉跨语言 query 改写。
+
+    **为什么。** 改写要扫语料、嵌术语、跑 BM25 校验——单元测试不该为此
+    加载真实语料与模型。需要测改写本身的用例自己把它打开。
+
+    这条也顺带保证了「检索层测试」测的是纯检索行为，
+    不会被改写悄悄改变结果（那会让断言变得难以理解）。
+    """
+    monkeypatch.setattr(settings, "enable_query_rewrite", False, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _disable_memory_layers(monkeypatch):
+    """默认关掉语义缓存与长期记忆。
+
+    **为什么必须关。** 这两个功能一开就会去连真实依赖：
+    · 语义缓存 → MySQL（`semantic_cache_entries` 表）+ Chroma collection
+    · 长期记忆 → MySQL（`user_memories` 表）+ Chroma collection + embedding 模型
+
+    不关的话，每个走 `stream_agent` 的用例都会尝试连库——
+    连不上时异常被 `except` 吞掉、测试仍然「通过」，但那只是把
+    「依赖缺失」伪装成了「功能正常」，比直接失败更难发现。
+
+    需要测这两层的用例自己打开开关，并注入替身。
+    """
+    monkeypatch.setattr(settings, "enable_semantic_cache", False, raising=False)
+    monkeypatch.setattr(settings, "enable_long_term_memory", False, raising=False)
+
+
 @pytest.fixture
 def sample_documents():
     return [

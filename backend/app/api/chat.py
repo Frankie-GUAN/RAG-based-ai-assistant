@@ -80,6 +80,8 @@ async def _stream_chat(request: ChatRequest, http_request: Request) -> AsyncGene
             summary=summary,
             tools=tools,
             max_iterations=request.max_iterations,
+            # 记忆溯源用：记下这条记忆是从哪个会话抽出来的
+            conversation_id=conversation_id,
         ):
             if isinstance(event, FinalEvent):
                 answer = event.answer

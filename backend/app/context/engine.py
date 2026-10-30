@@ -78,6 +78,7 @@ class ContextEngine:
         system: str,
         question: str,
         summary: str = "",
+        long_term_memory: str = "",
         history: Sequence[BaseMessage] = (),
         retrieved: Sequence[str] = (),
         scratchpad: str = "",
@@ -87,7 +88,17 @@ class ContextEngine:
         system_text, stat = self._fit_text("system", [system], self._budget.system_ratio)
         stats.append(stat)
 
-        memory_text, stat = self._fit_text("memory", [summary] if summary else [], self._budget.memory_ratio)
+        # memory 层同时容纳两类「记住的东西」，但**分开标注**：
+        # · 长期记忆是跨会话的（用户偏好、已确认事实），永远优先
+        # · 会话摘要是本会话早期的内容，会随会话结束失效
+        # 混在一起会让模型分不清「这是用户的长期偏好」还是「这个会话前面聊过」，
+        # 前者该一直遵守，后者只是上下文。
+        memory_items: list[str] = []
+        if long_term_memory:
+            memory_items.append(f"【用户长期偏好与已确认事实】\n{long_term_memory}")
+        if summary:
+            memory_items.append(f"【本会话早期对话摘要】\n{summary}")
+        memory_text, stat = self._fit_text("memory", memory_items, self._budget.memory_ratio)
         stats.append(stat)
 
         kept_history = self._fit_messages(list(history), self._budget.history_ratio)
