@@ -39,11 +39,27 @@ class _FakeVectorStore:
         self.results = results or []
         self.requested_k = None
         self.calls = 0
+        self.requested_vectors = []
 
     def similarity_search_with_relevance_scores(self, query, k):
         self.calls += 1
         self.requested_k = k
         return self.results[:k]
+
+    def similarity_search_by_vector_with_relevance_scores(self, embedding, k):
+        """生产代码现在走这条路径（query 向量走缓存，见 app/rag/query_cache.py）。
+
+        **保留旧方法是为了让回归用例在两种实现下都能跑**——
+        本 fake 只实现检索接口，不关心 query 是怎么来的。
+        """
+        self.calls += 1
+        self.requested_k = k
+        self.requested_vectors.append(embedding)
+        return self.results[:k]
+
+    def _select_relevance_score_fn(self):
+        """生产代码用它把距离转成 relevance；fake 直接返回恒等函数。"""
+        return lambda score: score
 
 
 class _EmptyBM25:

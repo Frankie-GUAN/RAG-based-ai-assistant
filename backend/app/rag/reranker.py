@@ -15,6 +15,35 @@ logger = logging.getLogger(__name__)
 # 都去重试一次 HuggingFace 下载。
 _RETRY_INTERVAL_SECONDS = 600.0
 
+# 送进 Cross-Encoder 的候选文本最大字符数。
+#
+# **为什么要截断。** 精排耗时与候选文本长度成正比（CPU 推理）：
+# 实测 10 个候选、每段 400~450 字符时，精排要 4.4~6.9 秒。
+# 而课件片段的前 300 字符通常已经包含标题与首句——
+# 标题是「这一片讲什么」的最强信号，后面的正文对「是否相关」贡献递减。
+#
+# 实测（同一批候选，逐档对比耗时与 top4 排序）：
+#     不截断      4.39s   top4 = [p59, p60, p63, p61]
+#     截断 800    4.09s   top4 = [p59, p60, p63, p61]
+#     截断 500    3.44s   top4 = [p59, p60, p63, p61]
+#     截断 300    3.02s   top4 = [p59, p60, p62, p63]   ← 只差一位
+#     截断 200    2.07s   top4 = [p60, p59, p62, p63]   ← top1 变了，太短
+#
+# 取 300：省掉约 30% 耗时，排序基本不变。
+# **注意这是取舍不是免费午餐**——200 字符就会改变判断结果，所以下限守在 300。
+_MAX_CANDIDATE_CHARS = 300
+
+
+def _clip_for_rerank(text: str) -> str:
+    """截断候选文本到 `_MAX_CANDIDATE_CHARS`。
+
+    **截断会丢信息**，所以这个值不能随便调小——
+    200 字符就足以让精排把 top1 换掉（见上方实测）。
+    """
+    if len(text) <= _MAX_CANDIDATE_CHARS:
+        return text
+    return text[:_MAX_CANDIDATE_CHARS]
+
 
 class Reranker:
     def __init__(self, model_name: str | None = None):
@@ -26,7 +55,7 @@ class Reranker:
         if not candidates:
             return []
 
-        pairs = [(query, doc.page_content) for doc, _ in candidates]
+        pairs = [(query, _clip_for_rerank(doc.page_content)) for doc, _ in candidates]
         scores = self._model.predict(pairs, show_progress_bar=False)
 
         ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
