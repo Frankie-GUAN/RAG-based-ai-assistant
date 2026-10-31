@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   mysql:
     image: mysql:8.0
@@ -8,7 +6,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ragagent123}
       MYSQL_DATABASE: rag_agent
-    ports:
+      ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
@@ -25,7 +23,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # 此前这里传的是 GEMINI_API_KEY，而 config.py 读DEEPSEEK_API_KEY ——
+      # compose 起的后端拿不到任何 LLM key，每次问答都会失败。
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      # 此前没有透传，联网搜索在 compose 环境下恒为关闭。
+      - SERPAPI_KEY=${SERPAPI_KEY:-}
+      - PRELOAD_MODELS=${PRELOAD_MODELS:-true}
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
       - MYSQL_USER=root
@@ -33,6 +37,10 @@ services:
       - MYSQL_DATABASE=rag_agent
     volumes:
       - ./data:/app/data
+      # 模型缓存：BGE-M3 约 2GB、精排模型再约 2GB。不挂出来的话，每次重建容器
+      # 都要重新下载一遍——而容器里未必有可用的 CA 证书（见 requirements.txt 里
+      # certifi 的注释），于是变成「每次 build 都要手动把模型搬进去」。
+      - hf-cache:/root/.cache/huggingface
     depends_on:
       mysql:
         condition: service_healthy
@@ -48,3 +56,4 @@ services:
 
 volumes:
   mysql_data:
+  hf-cache:

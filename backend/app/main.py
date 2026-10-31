@@ -1,29 +1,76 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.db.base import Base
+from app.db.migrate import ensure_columns
 from app.db.session import engine
 from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
 from app.api.tools import router as tools_router
 from app.api.evaluation import router as eval_router
 from app.api.conversations import router as conversations_router
+from app.mcp.client import open_tool_client
+from app.mcp.server import mcp_server
 
-import app.models.conversation  # noqa: F401
-import app.models.message       # noqa: F401
-import app.models.document      # noqa: F401
-import app.models.evaluation    # noqa: F401
+# 统一在 app.models 里 import 全部模型：既保证 Base.metadata 完整
+# （create_all 才建得出全部表），也保证 SQLAlchemy mapper 的外键解析
+# 不会因为「只导入了部分模型」而失败。
+import app.models  # noqa: F401
+
+logger = logging.getLogger(__name__)
+
+
+def _preload_retrieval() -> None:
+    """在启动线程里把检索链路拉起来，避免第一个请求付 10s 冷启动、
+    也避免并发请求一起去加载。"""
+    from app.rag.bm25_index import get_bm25_index
+    from app.rag.reranker import get_reranker
+    from app.rag.vector_store import get_embeddings, get_vectorstore, has_persisted_index
+
+    get_embeddings()
+    if has_persisted_index():
+        get_vectorstore()
+    get_bm25_index()
+    if settings.enable_reranker:
+        # 精排模型同样在CPU 上冷启动很慢。不预载的话，第一个需要检索的请求会
+        # 独自承担模型加载（数秒到数十秒），而它是唯一知情者。
+        get_reranker()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    yield
+    # 必须在 create_all 之后：create_all 只建表不给已有表加列
+    ensure_columns(engine)
+    if settings.preload_models:
+        import time
+
+        started = time.perf_counter()
+        try:
+            await asyncio.to_thread(_preload_retrieval)
+        except Exception:
+            # 预载只是延迟优化，绝不能用它换掉可用性：模型缺失、索引读不出来都只该让
+            # 首次检索付代价。embeddings / vectorstore 的单例保持 None，懒加载路径照常
+            # 工作；BM25 若已经走到那一步会被建出来并标记 _load_failed，由
+            # get_bm25_index() 重试，且 save() 会拒绝在空白基础上覆盖落盘 —— 若失败
+            # 发生在更早的步骤，_bm25 则保持 None，由首次请求的懒加载去设这个标记。
+            # 两条路都保住了可用性。
+            logger.exception("检索链路预载失败，将在首次请求时重试")
+        else:
+            logger.info("检索链路预载完成，耗时 %.2fs", time.perf_counter() - started)
+
+    # MCP 工具客户端与 Server 同进程，整个应用生命周期内复用同一个会话
+    async with open_tool_client(mcp_server) as tool_client:
+        app.state.mcp_client = tool_client
+        yield
 
 
-app = FastAPI(title="Agentic RAG API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Agentic RAG API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

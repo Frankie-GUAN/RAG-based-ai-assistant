@@ -1,22 +1,18 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
 
-from app.tools.registry import tool_registry
+from app.mcp.server import mcp_server
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 
-class ToolExecuteRequest(BaseModel):
-    name: str
-    params: dict = {}
-
-
-@router.get("/")
+@router.get("")
 async def list_tools():
-    return tool_registry.list_tools()
-
-
-@router.post("/execute")
-async def execute_tool(request: ToolExecuteRequest):
-    result = tool_registry.execute(request.name, **request.params)
-    return {"result": result}
+    """列出 Agent 可用的 MCP 工具。"""
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.input_schema,
+        }
+        for tool in await mcp_server.list_tools()
+    ]

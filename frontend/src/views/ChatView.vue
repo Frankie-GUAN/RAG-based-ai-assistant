@@ -18,7 +18,7 @@
         <div class="max-w-3xl mx-auto px-10 py-12">
           <!-- Empty state -->
           <div v-if="messages.length === 0" class="flex flex-col items-center justify-center" style="min-height: 60vh">
-            <p class="text-6xl mb-8" style="font-family: var(--font-display); color: var(--ink); line-height: 1.15">
+            <p class="empty-title text-6xl mb-8" style="font-family: var(--font-display); color: var(--ink); line-height: 1.15">
               What do you <span style="color: var(--clay); font-style: italic">need</span><br />to know today?
             </p>
             <p class="text-lg max-w-lg text-center leading-relaxed" style="color: var(--ink-muted)">
@@ -39,6 +39,13 @@
             <p class="text-lg leading-relaxed" style="color: var(--ink)">
               {{ streamingContent }}<span class="cursor-blink"></span>
             </p>
+          </div>
+
+          <!-- Error -->
+          <div v-if="streamError" class="py-4">
+            <div class="rounded-xl px-4 py-3 text-sm" style="background: var(--clay-wash); color: var(--clay)">
+              <span class="font-semibold">出错了：</span>{{ streamError }}
+            </div>
           </div>
 
           <!-- Bottom spacer for scroll comfort -->
@@ -78,23 +85,40 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import { useChat } from '../composables/useChat'
 import { useConversations } from '../composables/useConversations'
 import { useChatStore } from '../stores/chat'
+import { gsap } from '../composables/useGSAP'
 import ChatMessage from '../components/chat/ChatMessage.vue'
 import ChatInput from '../components/chat/ChatInput.vue'
 import AgentThinking from '../components/chat/AgentThinking.vue'
 import ConversationSidebar from '../components/chat/ConversationSidebar.vue'
 
-const { messages, isStreaming, currentRoute, streamingContent, sendMessage, loadConversationHistory, clearMessages } = useChat()
+const { messages, isStreaming, currentRoute, streamingContent, streamError, sendMessage, loadConversationHistory, clearMessages } = useChat()
 const { fetchConversations, deleteConversation, renameConversation } = useConversations()
 const store = useChatStore()
 const msgContainer = ref<HTMLElement>()
 const showContext = ref(false)
 
+let ctx: gsap.Context | null = null
+
 onMounted(() => {
   fetchConversations()
+
+  // Empty state breathing animation
+  const emptyTitle = (msgContainer.value?.querySelector('.empty-title') || document.querySelector('.empty-title')) as HTMLElement | null
+  if (emptyTitle) {
+    ctx = gsap.context(() => {
+      gsap.to(emptyTitle, {
+        y: -3, duration: 2, repeat: -1, yoyo: true, ease: 'sine.inOut',
+      })
+    })
+  }
+})
+
+onUnmounted(() => {
+  ctx?.revert()
 })
 
 const contextItems = computed(() => {
@@ -107,20 +131,34 @@ const contextItems = computed(() => {
 watch(messages, async () => {
   await nextTick()
   if (msgContainer.value) {
-    msgContainer.value.scrollTop = msgContainer.value.scrollHeight
+    gsap.to(msgContainer.value, {
+      scrollTop: msgContainer.value.scrollHeight,
+      duration: 0.5,
+      ease: 'power2.out',
+    })
   }
 }, { deep: true })
 
-watch(streamingContent, async () => {
+watch(streamingContent, async (val) => {
   await nextTick()
   if (msgContainer.value) {
-    msgContainer.value.scrollTop = msgContainer.value.scrollHeight
+    gsap.to(msgContainer.value, {
+      scrollTop: msgContainer.value.scrollHeight,
+      duration: 0.3,
+      ease: 'power2.out',
+    })
+  }
+
+  // Streaming cursor blink animation
+  const cursor = document.querySelector('.cursor-blink') as HTMLElement | null
+  if (cursor && val) {
+    gsap.to(cursor, { opacity: 0, duration: 0.4, repeat: -1, yoyo: true, ease: 'sine.inOut' })
   }
 })
 
 async function handleSend(text: string) {
   const history = messages.slice(-6).map(m => ({ role: m.role, content: m.content }))
-  await sendMessage(text, history, false)
+  await sendMessage(text, history)
 }
 
 async function onSelectConversation(id: number) {
@@ -158,7 +196,5 @@ function onNewChat() {
   background: var(--clay);
   margin-left: 2px;
   vertical-align: text-bottom;
-  animation: blink 0.8s steps(1) infinite;
 }
-@keyframes blink { 50% { opacity: 0; } }
 </style>

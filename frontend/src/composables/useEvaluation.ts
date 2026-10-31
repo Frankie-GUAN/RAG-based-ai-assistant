@@ -6,12 +6,12 @@ export function useEvaluation() {
   const isRunning = ref(false)
   const history = ref<any[]>([])
 
-  async function run(queries: string[], hasDocs: boolean) {
+  async function run(queries: string[]) {
     isRunning.value = true
     const response = await fetch('/api/evaluation/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ queries, has_docs: hasDocs }),
+      body: JSON.stringify({ queries }),
     })
     const data = await response.json()
     results.value = data.results

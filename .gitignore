@@ -11,11 +11,31 @@ __pycache__/
 
 # Local data/cache
 data/chroma/
+# 索引备份（app.rag.ingest --fresh 留下的旧格式索引，可能是唯一的副本，留在本机）
+data/chroma.bak.*/
 data/uploads/
 data/models/
+# BM25 索引产物：由 rank_bm25 构建后 pickle 落盘，属本地状态，不应入库
+data/bm25_index.pkl
+# 落盘的临时文件（写一半就崩时会留下）
+data/*.tmp
 
 # Tooling caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .cache/
+
+#忽略开发中涉及的文档
+docs/
+
+# 运行时数据：上传文件、向量索引、模型缓存、损坏索引备份、测试残留
+# （.gitignore 里原先只列了 data/ 下的子路径，导致 data/ 整体仍显示为未跟踪）
+data/
+
+# Claude Code 的本地权限配置，属个人环境，不应入库
+.claude/settings.local.json
+
+# AI 协作工具的工作数据（含本地记忆、生成中间产物）
+.workbuddy/
+output/
